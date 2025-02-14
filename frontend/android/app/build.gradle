@@ -1,0 +1,53 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services" // Ensure Google Services plugin is applied correctly
+}
+
+android {
+    namespace = "com.example.smart_parking_app"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        // Unique Application ID
+        applicationId = "com.smartparking_system.smart_parking_app"
+
+        // SDK Versions
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+
+        // App Versioning
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    buildTypes {
+        release {
+            // TODO: Add your own signing config for the release build.
+            signingConfig = signingConfigs.debug
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.firebase:firebase-auth:22.0.0'  // Firebase Authentication
+    implementation 'com.google.firebase:firebase-database:20.2.0' // Firebase Realtime Database
+    implementation 'com.google.firebase:firebase-storage:20.2.0'  // Firebase Storage
+    implementation 'com.google.android.gms:play-services-maps:18.1.0' // Google Maps SDK
+    implementation 'com.google.android.gms:play-services-location:21.0.1' // Location Services
+}
+
+// Apply Google Services plugin
+apply plugin: 'com.google.gms.google-services'
