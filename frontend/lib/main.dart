@@ -1,41 +1,72 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/booking/booking_screen.dart';
-import 'screens/map_screen.dart';
+import 'screens/booking/map_screen.dart';
+import 'screens/booking/booking_details_screen.dart';
 import 'screens/qr_code_screen.dart';
 import 'screens/scanner_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'utils/map_utils.dart';
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Maps
+  await MapUtils.initializeMap();
+  
+  // Initialize Supabase with correct URL and anon key
   await Supabase.initialize(
-    url: "YOUR_SUPABASE_URL",
-    anonKey: "YOUR_SUPABASE_ANON_KEY",
+    url: 'YOUR_SUPABASE_PROJECT_URL',  // Make sure this is correct
+    anonKey: 'YOUR_SUPABASE_ANON_KEY', // Make sure this is correct
   );
 
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Smart Parking',
+      title: 'Smart Parking App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        textTheme: GoogleFonts.robotoTextTheme(
+          Theme.of(context).textTheme,
+        ).copyWith(
+          bodyLarge: GoogleFonts.roboto(
+            fontSize: 16,
+            fontWeight: FontWeight.normal,
+          ),
+          bodyMedium: GoogleFonts.roboto(
+            fontSize: 14,
+            fontWeight: FontWeight.normal,
+          ),
+          titleLarge: GoogleFonts.roboto(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        useMaterial3: true,
       ),
-      initialRoute: '/',  // Set initial screen as Login
+      initialRoute: '/',
       routes: {
         '/': (context) => const LoginScreen(),
         '/home': (context) => const HomeScreen(),
-        '/booking': (context) => const BookingScreen(),
-        '/map': (context) => MapScreen(),
-        '/qr_code': (context) => const QRCodeScreen(bookingData: "Example"),
-        '/scanner': (context) => ScannerScreen(),
+        '/booking': (context) => const MapScreen(),
+        '/booking-details': (context) => BookingDetailsScreen(
+              spot: ModalRoute.of(context)!.settings.arguments as ParkingSpot,
+            ),
+        '/map': (context) => const MapScreen(),
+        '/qr_code': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return QRCodeScreen(bookingData: args);
+        },
+        '/scanner': (context) => const ScannerScreen(),
       },
     );
   }

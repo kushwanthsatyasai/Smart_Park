@@ -1,107 +1,340 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../widgets/custom_button.dart';
+import './register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  bool _isLoading = false;
+  final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _ageController = TextEditingController();
-  final _aadhaarController = TextEditingController();
-  
-  String _selectedVehicleType = 'Car'; // Default selection
-  bool _isLoading = false;
-  bool _isLogin = true;
+  bool _passwordVisible = false;
 
-  final List<String> _vehicleTypes = ['Car', 'Bike', 'Bus', 'Truck', 'Other'];
-
-  Future<void> _handleAuthAction() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty ||
-        (!_isLogin && (_nameController.text.isEmpty || _phoneController.text.isEmpty ||
-        _ageController.text.isEmpty || _aadhaarController.text.isEmpty))) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please fill in all required fields'),
-          backgroundColor: Colors.orange,
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Welcome back! 👋',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Text(
+                  'Please sign in to continue.',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      _buildTextField(
+                        controller: _emailController,
+                        label: 'Email',
+                        prefixIcon: Icons.email_outlined,
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your email';
+                          }
+                          if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                              .hasMatch(value)) {
+                            return 'Please enter a valid email';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _buildTextField(
+                        controller: _passwordController,
+                        label: 'Password',
+                        prefixIcon: Icons.lock_outline,
+                        isPassword: true,
+                        passwordVisible: _passwordVisible,
+                        onTogglePassword: () {
+                          setState(() {
+                            _passwordVisible = !_passwordVisible;
+                          });
+                        },
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your password';
+                          }
+                          if (value.length < 6) {
+                            return 'Password must be at least 6 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 32),
+                      _buildLoginButton(),
+                      const SizedBox(height: 24),
+                      _buildSocialLoginSection(),
+                      const SizedBox(height: 16),
+                      _buildRegisterLink(),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-      );
-      return;
-    }
+      ),
+    );
+  }
 
-    setState(() {
-      _isLoading = true;
-    });
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required IconData prefixIcon,
+    TextInputType? keyboardType,
+    bool isPassword = false,
+    bool? passwordVisible,
+    VoidCallback? onTogglePassword,
+    String? Function(String?)? validator,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: TextFormField(
+        controller: controller,
+        obscureText: isPassword && !(passwordVisible ?? false),
+        keyboardType: keyboardType,
+        validator: validator,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(prefixIcon, color: Colors.blue),
+          suffixIcon: isPassword
+              ? IconButton(
+                  icon: Icon(
+                    passwordVisible ?? false
+                        ? Icons.visibility_off
+                        : Icons.visibility,
+                    color: Colors.grey,
+                  ),
+                  onPressed: onTogglePassword,
+                )
+              : null,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: Colors.white,
+        ),
+      ),
+    );
+  }
 
+  Widget _buildLoginButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _isLoading ? null : _handleLogin,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: _isLoading
+            ? const SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            : const Text(
+                'Sign In',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildSocialLoginSection() {
+    return Column(
+      children: [
+        const Row(
+          children: [
+            Expanded(child: Divider()),
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Or sign in with',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            Expanded(child: Divider()),
+          ],
+        ),
+        const SizedBox(height: 20),
+        OutlinedButton.icon(
+          onPressed: _signInWithGoogle,
+          icon: Icon(Icons.g_mobiledata, size: 24, color: Colors.blue.shade700),
+          label: const Text(
+            'Continue with Google',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+          ),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            side: BorderSide(color: Colors.grey.shade300),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRegisterLink() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text('Don\'t have an account?'),
+        TextButton(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const RegisterScreen()),
+            );
+          },
+          child: const Text(
+            'Sign Up',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.blue,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleLogin() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
     try {
       final supabase = Supabase.instance.client;
 
-      if (_isLogin) {
-        final res = await supabase.auth.signInWithPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-        );
+      final authResponse = await supabase.auth.signInWithPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
 
-        if (res.user != null) {
-          print("Login successful! Navigating to Home...");
+      if (authResponse.user != null) {
+        // Check if email is verified
+        if (authResponse.user!.emailConfirmedAt == null) {
           if (mounted) {
-            Navigator.pushReplacementNamed(context, '/home');
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please verify your email before logging in'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+            return;
           }
         }
-      } else {
-        final res = await supabase.auth.signUp(
-          email: _emailController.text.trim(),
-          password: _passwordController.text.trim(),
-          data: {
-            'name': _nameController.text.trim(),
-            'phone': _phoneController.text.trim(),
-            'age': int.parse(_ageController.text.trim()),
-            'aadhaar': _aadhaarController.text.trim(),
-            'vehicle_type': _selectedVehicleType,
-          },
-        );
 
-        if (res.user != null) {
-          await supabase.from('profiles').insert({
-            'id': res.user!.id,
-            'name': _nameController.text.trim(),
-            'phone': _phoneController.text.trim(),
-            'email': _emailController.text.trim(),
-            'age': int.parse(_ageController.text.trim()),
-            'aadhaar': _aadhaarController.text.trim(),
-            'vehicle_type': _selectedVehicleType,
-          });
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Registration successful! Please verify your email.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-
-          setState(() {
-            _isLogin = true;
-          });
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/home');
         }
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    } on AuthException catch (error) {
+      if (mounted) {
+        String errorMessage = error.message;
+        if (error.message.contains('Invalid login credentials')) {
+          errorMessage = 'Invalid email or password. Please try again.';
+        } else if (error.message.contains('Email not confirmed')) {
+          errorMessage = 'Please verify your email before logging in.';
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${error.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    try {
+      await Supabase.instance.client.auth.signInWithOAuth(
+        Provider.google,
+        redirectTo: 'io.supabase.flutterquickstart://login-callback/',
+        queryParams: {
+          'access_type': 'offline',
+          'prompt': 'consent',
+        },
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please complete the sign in in your browser'),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${error.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -109,142 +342,6 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _nameController.dispose();
-    _phoneController.dispose();
-    _ageController.dispose();
-    _aadhaarController.dispose();
     super.dispose();
-  }
-  // Helper method to create input decorations for text fields
-InputDecoration _buildInputDecoration(String label, IconData icon) {
-  return InputDecoration(
-    labelText: label,
-    prefixIcon: Icon(icon),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-    ),
-  );
-}
-
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.blue.shade700, Colors.blue.shade900],
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.local_parking_rounded, size: 100, color: Colors.white),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Smart Parking',
-                    style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  const SizedBox(height: 40),
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.1), spreadRadius: 5, blurRadius: 15),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          _isLogin ? 'Welcome Back' : 'Create Account',
-                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Registration Fields
-                        if (!_isLogin) ...[
-                          _buildTextField(_nameController, 'Full Name', Icons.person),
-                          const SizedBox(height: 16),
-                          _buildTextField(_ageController, 'Age', Icons.calendar_today, keyboardType: TextInputType.number),
-                          const SizedBox(height: 16),
-                          _buildTextField(_phoneController, 'Phone Number', Icons.phone),
-                          const SizedBox(height: 16),
-                          _buildTextField(_aadhaarController, 'Aadhaar Number', Icons.credit_card, keyboardType: TextInputType.number),
-                          const SizedBox(height: 16),
-                          DropdownButtonFormField<String>(
-                            value: _selectedVehicleType,
-                            decoration: _buildInputDecoration('Vehicle Type', Icons.directions_car),
-                            items: _vehicleTypes.map((type) {
-                              return DropdownMenuItem(
-                                value: type,
-                                child: Text(type),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedVehicleType = value!;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-
-                        _buildTextField(_emailController, 'Email', Icons.email, keyboardType: TextInputType.emailAddress),
-                        const SizedBox(height: 16),
-                        _buildTextField(_passwordController, 'Password', Icons.lock, obscureText: true),
-                        const SizedBox(height: 24),
-
-                        CustomButton(
-                          text: _isLoading ? 'Please wait...' : (_isLogin ? 'Login' : 'Register'),
-                          onPressed: _isLoading ? () {} : _handleAuthAction,
-                        ),
-                        const SizedBox(height: 16),
-                        TextButton(
-                          onPressed: _isLoading
-                              ? null
-                              : () {
-                                  setState(() {
-                                    _isLogin = !_isLogin;
-                                    _emailController.clear();
-                                    _passwordController.clear();
-                                  });
-                                },
-                          child: Text(_isLogin ? 'Don\'t have an account? Register' : 'Already have an account? Login'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTextField(
-      TextEditingController controller, String label, IconData icon,
-      {bool obscureText = false, TextInputType keyboardType = TextInputType.text}) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-      obscureText: obscureText,
-      keyboardType: keyboardType,
-    );
   }
 }
