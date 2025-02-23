@@ -57,9 +57,9 @@
 		</dict>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs access to location when open to show nearby parking spots.</string>
+	<string>This app needs access to location when open to show your position on the map.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>This app needs access to location when in the background to show nearby parking spots.</string>
+	<string>This app needs access to location when in the background for navigation.</string>
 	<key>io.flutter.embedded_views_preview</key>
 	<true/>
 </dict>

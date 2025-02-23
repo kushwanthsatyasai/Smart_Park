@@ -5,6 +5,7 @@ import 'screens/auth/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/booking/map_screen.dart';
 import 'screens/booking/booking_details_screen.dart';
+import 'screens/booking/booking_confirmation_screen.dart';
 import 'screens/qr_code_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,10 +17,15 @@ void main() async {
   // Initialize Maps
   await MapUtils.initializeMap();
   
-  // Initialize Supabase with correct URL and anon key
+  // Load environment variables
+  await dotenv.load(fileName: ".env");
+  
+  // Initialize Supabase with environment variables
   await Supabase.initialize(
-    url: 'YOUR_SUPABASE_PROJECT_URL',  // Make sure this is correct
-    anonKey: 'YOUR_SUPABASE_ANON_KEY', // Make sure this is correct
+    url: dotenv.env['SUPABASE_URL']!,
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    authCallbackUrlHostname: 'login-callback',
+    debug: true
   );
 
   runApp(const MyApp());
@@ -58,9 +64,14 @@ class MyApp extends StatelessWidget {
         '/': (context) => const LoginScreen(),
         '/home': (context) => const HomeScreen(),
         '/booking': (context) => const MapScreen(),
-        '/booking-details': (context) => BookingDetailsScreen(
-              spot: ModalRoute.of(context)!.settings.arguments as ParkingSpot,
-            ),
+        '/booking-details': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return BookingDetailsScreen(arguments: args);
+        },
+        '/booking-confirmation': (context) {
+          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+          return BookingConfirmationScreen(booking: args);
+        },
         '/map': (context) => const MapScreen(),
         '/qr_code': (context) {
           final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../widgets/custom_button.dart';
 import './vehicle_aadhaar_form.dart';
+import 'dart:async';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -37,6 +38,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _passwordsMatch = true;
   String? _passwordError;
 
+  Timer? _timer;
+  StreamSubscription? _subscription;
+
   bool _validatePassword(String password) {
     RegExp passwordRegex = RegExp(
       r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
@@ -63,93 +67,67 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
       final supabase = Supabase.instance.client;
       
-      // First create the user with email confirmation and user metadata
-      final authResponse = await supabase.auth.signUp(
+      // Check if email already exists - modified query
+      final existingUsers = await supabase
+          .from('profiles')
+          .select()
+          .eq('email', _emailController.text.trim());
+          
+      if (existingUsers.length > 0) {
+        throw 'Email already registered';
+      }
+
+      // First create the user
+      final AuthResponse authResponse = await supabase.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
-        data: {  // Add user metadata here
-          'name': _nameController.text,
-          'age': int.parse(_ageController.text),
-          'phone_number': _phoneController.text,
-          'vehicle_type': _selectedVehicleType,
-          'vehicle_number': _selectedVehicleType == 'Cycle' ? null : _vehicleNumberController.text,
-          'aadhaar_number': _aadhaarController.text,
-        },
-        emailRedirectTo: 'io.supabase.flutterquickstart://login-callback/',
       );
 
-      if (authResponse.user != null) {
-        // Create profile after successful signup
-        await supabase.from('profiles').insert({
-          'id': authResponse.user!.id,
-          'email': _emailController.text.trim(),
-          'name': _nameController.text,
-          'age': int.parse(_ageController.text),
-          'vehicle_type': _selectedVehicleType,
-          'vehicle_number': _selectedVehicleType == 'Cycle' ? null : _vehicleNumberController.text,
-          'aadhaar_number': _aadhaarController.text,
-          'phone_number': _phoneController.text,
-          'created_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        }).execute();
+      if (!mounted) return;
 
-        // Also update auth.users metadata
-        await supabase.auth.updateUser(
-          UserAttributes(
-            data: {
+      if (authResponse.user != null) {
+        // Create profile with proper error handling
+        final response = await supabase
+            .from('profiles')
+            .insert({
+              'id': authResponse.user!.id,
+              'email': _emailController.text.trim(),
               'name': _nameController.text,
               'age': int.parse(_ageController.text),
-              'phone_number': _phoneController.text,
               'vehicle_type': _selectedVehicleType,
               'vehicle_number': _selectedVehicleType == 'Cycle' ? null : _vehicleNumberController.text,
               'aadhaar_number': _aadhaarController.text,
-            },
-          ),
-        );
+              'phone_number': _phoneController.text,
+              'created_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .select()
+            .single();
+
+        if (response == null) {
+          throw 'Failed to create profile';
+        }
 
         if (mounted) {
-          // Show verification dialog
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (BuildContext context) {
               return AlertDialog(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                title: const Text(
-                  'Verification Required',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.mark_email_unread_outlined,
-                      size: 64,
-                      color: Colors.blue,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Please check your email to verify your account. After verification, you can login.',
-                      style: TextStyle(fontSize: 16),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+                title: const Text('Verification Required'),
+                content: const Text('Please check your email to verify your account before logging in.'),
                 actions: [
                   TextButton(
-                    child: const Text(
-                      'OK',
-                      style: TextStyle(fontSize: 16),
-                    ),
+                    child: const Text('OK'),
                     onPressed: () {
                       Navigator.of(context).pop();
                       Navigator.pushReplacementNamed(context, '/');
@@ -161,23 +139,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
           );
         }
       }
-    } on PostgrestException catch (error) {
+    } on PostgrestException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Database Error: ${error.message}'),
+            content: Text('Database Error: ${e.message}'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),
         );
       }
-    } on AuthException catch (error) {
+    } on AuthException catch (e) {
       if (mounted) {
-        String errorMessage = error.message;
-        if (error.message.contains('rate limit')) {
-          errorMessage = 'Please wait a few minutes before trying again';
-        } else if (error.message.contains('already registered')) {
-          errorMessage = 'This email is already registered. Please try logging in.';
+        String errorMessage = 'Registration failed';
+        if (e.statusCode == 429) {
+          errorMessage = 'Please wait a few minutes before trying to register again';
+        } else if (e.message.contains('email')) {
+          errorMessage = 'This email is already registered';
         }
         
         ScaffoldMessenger.of(context).showSnackBar(
@@ -188,11 +166,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         );
       }
-    } catch (error) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${error.toString()}'),
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),
@@ -205,29 +183,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _signInWithGoogle() async {
     try {
+      setState(() => _isLoading = true);
+      
       final response = await Supabase.instance.client.auth.signInWithOAuth(
         Provider.google,
         redirectTo: 'io.supabase.flutterquickstart://login-callback/',
-        queryParams: {
-          'access_type': 'offline',
-          'prompt': 'consent',
-        },
       );
       
+      if (!mounted) return;
+
       if (response) {
-        if (mounted) {
-          // Get user data after successful sign in
-          final user = Supabase.instance.client.auth.currentUser;
-          if (user != null) {
-            // Create or update profile
-            await Supabase.instance.client.from('profiles').upsert({
-              'id': user.id,
-              'email': user.email,
-              'name': user.userMetadata?['full_name'],
-              'updated_at': DateTime.now().toIso8601String(),
-            });
-            
-            Navigator.pushReplacementNamed(context, '/home');
+        // Wait briefly to allow auth state to update
+        await Future.delayed(const Duration(seconds: 2));
+        
+        final user = Supabase.instance.client.auth.currentUser;
+        if (user != null) {
+          // Create or update profile
+          await Supabase.instance.client.from('profiles').upsert({
+            'id': user.id,
+            'email': user.email,
+            'name': user.userMetadata?['full_name'],
+            'updated_at': DateTime.now().toIso8601String(),
+          }).execute();
+          
+          if (mounted) {
+            Navigator.of(context).pushReplacementNamed('/home');
           }
         }
       }
@@ -240,6 +220,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -364,6 +346,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         controller: controller,
         obscureText: isPassword,
         keyboardType: keyboardType,
+        validator: (value) {
+          if (value == null || value.isEmpty) {
+            return 'Please enter $label';
+          }
+          return null;
+        },
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(prefixIcon, color: Colors.blue),
@@ -441,19 +429,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: _isLoading 
-          ? null 
-          : () async {
-              if (_isLoading) return;
-              
-              // Disable button for 30 seconds after click
-              setState(() => _isLoading = true);
-              await _handleRegister();
-              if (mounted) {
-                await Future.delayed(const Duration(seconds: 30));
-                setState(() => _isLoading = false);
-              }
-            },
+        onPressed: _isLoading ? null : _handleRegister,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.blue,
           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -544,14 +520,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _ageController.dispose();
+    // Dispose controllers
     _emailController.dispose();
     _passwordController.dispose();
-    _confirmPasswordController.dispose();
+    _nameController.dispose();
+    _ageController.dispose();
+    _phoneController.dispose();
     _vehicleNumberController.dispose();
     _aadhaarController.dispose();
-    _phoneController.dispose();
+    _confirmPasswordController.dispose();
+    
     super.dispose();
   }
 }

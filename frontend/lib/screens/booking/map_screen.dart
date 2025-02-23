@@ -5,138 +5,234 @@ import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../widgets/custom_button.dart';
 import '../../utils/map_utils.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:url_launcher/url_launcher.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({Key? key}) : super(key: key);
+  const MapScreen({super.key});
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
 class _MapScreenState extends State<MapScreen> {
+  final supabase = Supabase.instance.client;
   GoogleMapController? _mapController;
   Position? _currentPosition;
   Set<Marker> _markers = {};
   bool _isLoading = true;
-  ParkingSpot? _selectedSpot;
-  bool _mapInitialized = false;
-
-  // Default camera position (you can set this to your city's coordinates)
-  static const CameraPosition _defaultLocation = CameraPosition(
-    target: LatLng(17.3850, 78.4867), // Hyderabad coordinates
-    zoom: 14.0,
-  );
+  List<Map<String, dynamic>> _parkingLots = [];
 
   @override
   void initState() {
     super.initState();
-    _initializeMap();
+    _initializeLocation();
   }
 
-  Future<void> _initializeMap() async {
-    try {
-      await MapUtils.initializeMap();
-      setState(() => _mapInitialized = true);
-      await _getCurrentLocation();
-      await _loadParkingSpots();
-    } catch (e) {
-      print('Error initializing map: $e');
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _getCurrentLocation() async {
+  Future<void> _initializeLocation() async {
+    setState(() => _isLoading = true);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        throw Exception('Location services are disabled.');
+        throw 'Location services are disabled';
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          throw Exception('Location permissions are denied.');
+          throw 'Location permissions are denied';
         }
       }
 
-      Position position = await Geolocator.getCurrentPosition();
+      if (permission == LocationPermission.deniedForever) {
+        throw 'Location permissions are permanently denied';
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
       setState(() {
         _currentPosition = position;
-        _isLoading = false;
       });
 
-      final GoogleMapController controller = await _mapController!;
-      controller.animateCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(
-            target: LatLng(position.latitude, position.longitude),
-            zoom: 15,
+      if (_mapController != null) {
+        await _mapController!.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(
+              target: LatLng(position.latitude, position.longitude),
+              zoom: 15,
+            ),
           ),
-        ),
-      );
+        );
+      }
+
+      await _fetchNearbyParkingLots();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error getting location: $e')),
+          SnackBar(content: Text('Error: $e')),
         );
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isLoading = false);
       }
     }
   }
 
-  Future<void> _loadParkingSpots() async {
+  Future<void> _fetchNearbyParkingLots() async {
+    if (_currentPosition == null) return;
+
     try {
-      final supabase = Supabase.instance.client;
-      final spots = await supabase.from('parking_spots').select();
-      
-      if (mounted) {
-        setState(() {
-          _markers = spots.map<Marker>((spot) {
-            return Marker(
-              markerId: MarkerId(spot['id'].toString()),
-              position: LatLng(
-                double.parse(spot['latitude'].toString()),
-                double.parse(spot['longitude'].toString()),
-              ),
-              infoWindow: InfoWindow(title: spot['name']),
-              onTap: () => _showParkingDetails(ParkingSpot.fromJson(spot)),
-            );
-          }).toSet();
-        });
+      final response = await supabase
+          .from('parking_lots')
+          .select('*, parking_slots(*)')
+          .execute();
+
+      if (response == null || response.data == null) {
+        throw 'Failed to fetch parking lots';
       }
+
+      List<Map<String, dynamic>> lots = List<Map<String, dynamic>>.from(response.data);
+      
+      // Calculate distances and filter nearby lots (within 5km)
+      lots = lots.where((lot) {
+        double distance = Geolocator.distanceBetween(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+          lot['latitude'],
+          lot['longitude'],
+        );
+        lot['distance'] = distance;
+        return distance <= 5000; // 5km radius
+      }).toList();
+
+      // Sort by distance
+      lots.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
+
+      setState(() {
+        _parkingLots = lots;
+        _updateMarkers();
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading parking spots: $e')),
+          SnackBar(content: Text('Error fetching parking lots: $e')),
         );
       }
     }
   }
 
-  void _showParkingDetails(ParkingSpot spot) {
-    setState(() => _selectedSpot = spot);
+  void _updateMarkers() {
+    Set<Marker> newMarkers = {};
+
+    for (var lot in _parkingLots) {
+      int availableSlots = (lot['parking_slots'] as List)
+          .where((slot) => slot['is_available'] == true)
+          .length;
+
+      newMarkers.add(
+        Marker(
+          markerId: MarkerId(lot['id'].toString()),
+          position: LatLng(
+            lot['latitude'],
+            lot['longitude'],
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(
+            availableSlots > 0 ? BitmapDescriptor.hueGreen : BitmapDescriptor.hueRed
+          ),
+          infoWindow: InfoWindow(
+            title: lot['name'],
+            snippet: 'Available: $availableSlots | ${(lot['distance'] / 1000).toStringAsFixed(2)}km',
+          ),
+          onTap: () => _showParkingLotDetails(lot, availableSlots),
+        ),
+      );
+    }
+
+    setState(() {
+      _markers = newMarkers;
+    });
+  }
+
+  void _showParkingLotDetails(Map<String, dynamic> lot, int availableSlots) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => ParkingDetailsSheet(
-        spot: spot,
-        userLocation: _currentPosition,
-        onBookingPressed: () => _navigateToBooking(spot),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              lot['name'],
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Distance: ${(lot['distance'] / 1000).toStringAsFixed(2)} km',
+              style: const TextStyle(fontSize: 16),
+            ),
+            Text(
+              'Available Slots: $availableSlots',
+              style: const TextStyle(fontSize: 16),
+            ),
+            Text(
+              'Price: ₹${lot['price_per_hour']}/hour',
+              style: const TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: () => _showRoute(lot),
+                  icon: const Icon(Icons.directions),
+                  label: const Text('Show Route'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: availableSlots > 0
+                      ? () => Navigator.pushNamed(
+                            context,
+                            '/booking-details',
+                            arguments: {
+                              'parking_lot': lot,
+                              'distance': lot['distance'],
+                            },
+                          )
+                      : null,
+                  icon: const Icon(Icons.local_parking),
+                  label: const Text('Book Now'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  void _navigateToBooking(ParkingSpot spot) {
-    Navigator.pop(context); // Close bottom sheet
-    Navigator.pushNamed(
-      context,
-      '/booking-details',
-      arguments: spot,
+  Future<void> _showRoute(Map<String, dynamic> lot) async {
+    if (_currentPosition == null) return;
+
+    final url = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1'
+      '&origin=${_currentPosition!.latitude},${_currentPosition!.longitude}'
+      '&destination=${lot['latitude']},${lot['longitude']}'
+      '&travelmode=driving'
     );
+
+    try {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open maps')),
+        );
+      }
+    }
   }
 
   @override
@@ -144,72 +240,78 @@ class _MapScreenState extends State<MapScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Find Parking'),
-        backgroundColor: Colors.blue,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _initializeLocation,
+          ),
+        ],
       ),
-      body: _isLoading || !_mapInitialized
-          ? const Center(child: CircularProgressIndicator())
-          : Stack(
-              children: [
-                GoogleMap(
-                  initialCameraPosition: _defaultLocation,
-                  onMapCreated: (GoogleMapController controller) {
-                    if (mounted) {
-                      setState(() {
-                        _mapController = controller;
-                        _isLoading = false;
-                      });
-                    }
-                  },
-                  markers: _markers,
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: true,
-                  mapType: MapType.normal,
-                  zoomControlsEnabled: true,
-                  zoomGesturesEnabled: true,
-                  compassEnabled: true,
-                ),
-                if (_selectedSpot != null)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      margin: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 10,
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _selectedSpot!.name,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text('Available: ${_selectedSpot!.availableSpots}'),
-                          Text('Price: ₹${_selectedSpot!.pricePerHour}/hour'),
-                          const SizedBox(height: 16),
-                          CustomButton(
-                            text: 'Book Now',
-                            onPressed: () => _navigateToBooking(_selectedSpot!),
-                          ),
-                        ],
+      body: Stack(
+        children: [
+          GoogleMap(
+            initialCameraPosition: CameraPosition(
+              target: _currentPosition != null
+                  ? LatLng(_currentPosition!.latitude, _currentPosition!.longitude)
+                  : const LatLng(20.5937, 78.9629), // Default to India's center
+              zoom: 15,
+            ),
+            onMapCreated: (GoogleMapController controller) {
+              setState(() {
+                _mapController = controller;
+                if (_currentPosition != null) {
+                  controller.animateCamera(
+                    CameraUpdate.newCameraPosition(
+                      CameraPosition(
+                        target: LatLng(
+                          _currentPosition!.latitude,
+                          _currentPosition!.longitude,
+                        ),
+                        zoom: 15,
                       ),
                     ),
-                  ),
-              ],
+                  );
+                }
+              });
+            },
+            markers: _markers,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            zoomControlsEnabled: true,
+            compassEnabled: true,
+            mapToolbarEnabled: true,
+            circles: _currentPosition != null
+                ? {
+                    Circle(
+                      circleId: const CircleId('currentLocation'),
+                      center: LatLng(
+                        _currentPosition!.latitude,
+                        _currentPosition!.longitude,
+                      ),
+                      radius: 50, // 50 meters radius
+                      fillColor: Colors.blue.withOpacity(0.2),
+                      strokeColor: Colors.blue,
+                      strokeWidth: 2,
+                    ),
+                  }
+                : {},
+          ),
+          if (_isLoading)
+            Container(
+              color: Colors.black.withOpacity(0.5),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
             ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _initializeLocation,
+        backgroundColor: Theme.of(context).primaryColor,
+        child: const Icon(Icons.my_location, color: Colors.white),
+      ),
     );
   }
 
