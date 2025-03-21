@@ -4,8 +4,15 @@ import '../../widgets/custom_button.dart';
 
 class VehicleAadhaarForm extends StatefulWidget {
   final String userId;
+  final String? email;
+  final String? name;
 
-  const VehicleAadhaarForm({super.key, required this.userId});
+  const VehicleAadhaarForm({
+    super.key, 
+    required this.userId,
+    this.email,
+    this.name,
+  });
 
   @override
   State<VehicleAadhaarForm> createState() => _VehicleAadhaarFormState();
@@ -17,6 +24,51 @@ class _VehicleAadhaarFormState extends State<VehicleAadhaarForm> {
   final _aadhaarController = TextEditingController();
   String _selectedVehicleType = 'Car';
   bool _isLoading = false;
+
+  Future<void> _submitForm() async {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      final supabase = Supabase.instance.client;
+      
+      // Create or update profile
+      await supabase.from('profiles').upsert({
+        'id': widget.userId,
+        'email': widget.email,
+        'name': widget.name,
+        'vehicle_type': _selectedVehicleType,
+        'vehicle_number': _selectedVehicleType == 'Cycle' ? null : _vehicleNumberController.text.trim(),
+        'aadhaar_number': _aadhaarController.text.trim(),
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+
+      if (mounted) {
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile updated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Navigate to home screen
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${error.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +110,7 @@ class _VehicleAadhaarFormState extends State<VehicleAadhaarForm> {
                 onChanged: (String? newValue) {
                   setState(() => _selectedVehicleType = newValue!);
                 },
+                validator: (value) => value == null ? 'Please select vehicle type' : null,
               ),
               const SizedBox(height: 16),
               if (_selectedVehicleType != 'Cycle')
@@ -70,6 +123,7 @@ class _VehicleAadhaarFormState extends State<VehicleAadhaarForm> {
                   ),
                   validator: (value) => _selectedVehicleType != 'Cycle' && 
                       (value?.isEmpty ?? true) ? 'Please enter vehicle number' : null,
+                  textCapitalization: TextCapitalization.characters,
                 ),
               const SizedBox(height: 16),
               TextFormField(
@@ -84,42 +138,29 @@ class _VehicleAadhaarFormState extends State<VehicleAadhaarForm> {
                 validator: (value) {
                   if (value?.isEmpty ?? true) return 'Please enter Aadhaar number';
                   if (value!.length != 12) return 'Aadhaar number must be 12 digits';
+                  if (!RegExp(r'^[0-9]{12}$').hasMatch(value)) {
+                    return 'Invalid Aadhaar number';
+                  }
                   return null;
                 },
               ),
               const SizedBox(height: 24),
               CustomButton(
                 text: 'Submit',
-                onPressed: _isLoading ? null : () async {
-                  if (!_formKey.currentState!.validate()) return;
-                  
-                  setState(() => _isLoading = true);
-                  try {
-                    await Supabase.instance.client.from('profiles').upsert({
-                      'id': widget.userId,
-                      'vehicle_type': _selectedVehicleType,
-                      'vehicle_number': _selectedVehicleType == 'Cycle' ? null : _vehicleNumberController.text,
-                      'aadhaar_number': _aadhaarController.text,
-                    });
-                    
-                    if (mounted) {
-                      Navigator.pushReplacementNamed(context, '/home');
-                    }
-                  } catch (error) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Error: ${error.toString()}')),
-                      );
-                    }
-                  } finally {
-                    if (mounted) setState(() => _isLoading = false);
-                  }
-                },
+                onPressed: _isLoading ? null : _submitForm,
+                isLoading: _isLoading,
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _vehicleNumberController.dispose();
+    _aadhaarController.dispose();
+    super.dispose();
   }
 }

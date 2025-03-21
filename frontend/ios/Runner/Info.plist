@@ -50,17 +50,22 @@
 		<dict>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>io.supabase.flutterquickstart</string>
+				<string>com.smartparking.app</string>
 			</array>
-			<key>CFBundleURLName</key>
-			<string>com.example.app</string>
 		</dict>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs access to location when open to show your position on the map.</string>
+	<string>This app needs access to location when open to show nearby parking spots.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>This app needs access to location when in the background for navigation.</string>
+	<string>This app needs access to location when in the background to show nearby parking spots.</string>
 	<key>io.flutter.embedded_views_preview</key>
 	<true/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>https</string>
+		<string>http</string>
+		<string>tel</string>
+		<string>mailto</string>
+	</array>
 </dict>
 </plist>

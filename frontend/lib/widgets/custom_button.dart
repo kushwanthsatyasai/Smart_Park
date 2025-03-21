@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 class CustomButton extends StatelessWidget {
   final String text;
   final VoidCallback? onPressed;
+  final bool isLoading;
 
   const CustomButton({
-    Key? key,
+    super.key,
     required this.text,
     this.onPressed,
-  }) : super(key: key);
+    this.isLoading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -20,8 +22,8 @@ class CustomButton extends StatelessWidget {
           backgroundColor: Colors.blue.shade900,
           foregroundColor: Colors.white,
         ),
-        onPressed: onPressed,
-        child: onPressed == null
+        onPressed: isLoading ? null : onPressed,
+        child: isLoading
             ? const CircularProgressIndicator(color: Colors.white)
             : Text(text),
       ),

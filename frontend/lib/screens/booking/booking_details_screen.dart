@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../widgets/custom_button.dart';
-import 'map_screen.dart';
-import './booking_confirmation_screen.dart';
 
 class BookingDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> arguments;
 
   const BookingDetailsScreen({
-    Key? key,
+    super.key,
     required this.arguments,
-  }) : super(key: key);
+  });
 
   @override
   State<BookingDetailsScreen> createState() => _BookingDetailsScreenState();
@@ -199,7 +196,8 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                                 height: 20,
                                 width: 20,
                                 child: CircularProgressIndicator(
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
                                 ),
                               )
                             : const Text(
@@ -225,7 +223,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
 
     try {
       final supabase = Supabase.instance.client;
-      
+
       // Start a transaction
       final response = await supabase.rpc('create_booking', params: {
         'p_user_id': supabase.auth.currentUser!.id,
@@ -259,4 +257,4 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
     _durationController.dispose();
     super.dispose();
   }
-} 
+}

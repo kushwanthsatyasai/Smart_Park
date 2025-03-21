@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../widgets/custom_button.dart';
-import './vehicle_aadhaar_form.dart';
-import 'dart:async';
+
+const Color primaryBlue = Color(0xFF1A73E8);
+const Color secondaryBlue = Color(0xFF4285F4);
+const Color lightBlue = Color(0xFFE8F0FE);
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -12,210 +13,95 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  bool _isLoading = false;
   final _formKey = GlobalKey<FormState>();
-  
-  // Controllers for all fields
   final _nameController = TextEditingController();
-  final _ageController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _ageController = TextEditingController();
   final _vehicleNumberController = TextEditingController();
   final _aadhaarController = TextEditingController();
   final _phoneController = TextEditingController();
-  
-  // Vehicle type dropdown
-  String? _selectedVehicleType;
-  final List<String> _vehicleTypes = ['Cycle', 'Bike', 'Car', 'Bus'];
+  String _selectedVehicleType = 'car';
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+  late final SupabaseClient _supabase;
 
-  bool _passwordVisible = false;
-  bool _confirmPasswordVisible = false;
-  String? _passwordMatchError;
+  // Password strength indicators
+  bool _hasMinLength = false;
+  bool _hasUpperCase = false;
+  bool _hasLowerCase = false;
+  bool _hasNumber = false;
+  bool _hasSpecialChar = false;
 
-  // Add these boolean state variables
-  bool _isPasswordValid = false;
-  bool _passwordsMatch = true;
-  String? _passwordError;
+  @override
+  void initState() {
+    super.initState();
+    _supabase = Supabase.instance.client;
+    _passwordController.addListener(_checkPasswordStrength);
+  }
 
-  Timer? _timer;
-  StreamSubscription? _subscription;
+  void _checkPasswordStrength() {
+    final password = _passwordController.text;
+    setState(() {
+      _hasMinLength = password.length >= 8;
+      _hasUpperCase = password.contains(RegExp(r'[A-Z]'));
+      _hasLowerCase = password.contains(RegExp(r'[a-z]'));
+      _hasNumber = password.contains(RegExp(r'[0-9]'));
+      _hasSpecialChar = password.contains(RegExp(r'[@$!%*?&]'));
+    });
+  }
 
   bool _validatePassword(String password) {
-    RegExp passwordRegex = RegExp(
-      r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
-    );
-    return passwordRegex.hasMatch(password);
+    return RegExp(
+            r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$')
+        .hasMatch(password);
   }
 
-  void _checkPasswordMatch(String value) {
-    setState(() {
-      _passwordsMatch = value == _passwordController.text;
-    });
-  }
-
-  void _validatePasswordMatch(String value) {
-    setState(() {
-      if (_passwordController.text != value) {
-        _passwordMatchError = 'Passwords don\'t match';
-      } else {
-        _passwordMatchError = null;
-      }
-    });
-  }
-
-  Future<void> _handleRegister() async {
+  Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
-    if (!mounted) return;
-    
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
-      final supabase = Supabase.instance.client;
-      
-      // Check if email already exists - modified query
-      final existingUsers = await supabase
-          .from('profiles')
-          .select()
-          .eq('email', _emailController.text.trim());
-          
-      if (existingUsers.length > 0) {
-        throw 'Email already registered';
-      }
-
-      // First create the user
-      final AuthResponse authResponse = await supabase.auth.signUp(
+      // Step 1: Sign up the user
+      final res = await _supabase.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
 
-      if (!mounted) return;
+      if (res.user == null) throw 'Registration failed';
 
-      if (authResponse.user != null) {
-        // Create profile with proper error handling
-        final response = await supabase
-            .from('profiles')
-            .insert({
-              'id': authResponse.user!.id,
-              'email': _emailController.text.trim(),
-              'name': _nameController.text,
-              'age': int.parse(_ageController.text),
-              'vehicle_type': _selectedVehicleType,
-              'vehicle_number': _selectedVehicleType == 'Cycle' ? null : _vehicleNumberController.text,
-              'aadhaar_number': _aadhaarController.text,
-              'phone_number': _phoneController.text,
-              'created_at': DateTime.now().toIso8601String(),
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .select()
-            .single();
+      // Step 2: Create profile with all required fields
+      await _supabase.from('profiles').insert({
+        'id': res.user!.id,
+        'email': _emailController.text.trim(),
+        'name': _nameController.text.trim(),
+        'phone_number': _phoneController.text.trim(),
+        'aadhaar_number': _aadhaarController.text.trim(),
+        'age': int.parse(_ageController.text),
+        'vehicle_type': _selectedVehicleType,
+        'vehicle_number': _vehicleNumberController.text.trim(),
+        'role': 'customer',
+        'created_at': DateTime.now().toIso8601String(),
+      });
 
-        if (response == null) {
-          throw 'Failed to create profile';
-        }
-
-        if (mounted) {
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (BuildContext context) {
-              return AlertDialog(
-                title: const Text('Verification Required'),
-                content: const Text('Please check your email to verify your account before logging in.'),
-                actions: [
-                  TextButton(
-                    child: const Text('OK'),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      Navigator.pushReplacementNamed(context, '/');
-                    },
-                  ),
-                ],
-              );
-            },
-          );
-        }
-      }
-    } on PostgrestException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Database Error: ${e.message}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
+          const SnackBar(
+            content: Text('Registration successful! Please login.'),
+            backgroundColor: Colors.green,
           ),
         );
-      }
-    } on AuthException catch (e) {
-      if (mounted) {
-        String errorMessage = 'Registration failed';
-        if (e.statusCode == 429) {
-          errorMessage = 'Please wait a few minutes before trying to register again';
-        } else if (e.message.contains('email')) {
-          errorMessage = 'This email is already registered';
-        }
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
+        Navigator.of(context).pushReplacementNamed('/login');
       }
     } catch (e) {
+      print('Registration error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _signInWithGoogle() async {
-    try {
-      setState(() => _isLoading = true);
-      
-      final response = await Supabase.instance.client.auth.signInWithOAuth(
-        Provider.google,
-        redirectTo: 'io.supabase.flutterquickstart://login-callback/',
-      );
-      
-      if (!mounted) return;
-
-      if (response) {
-        // Wait briefly to allow auth state to update
-        await Future.delayed(const Duration(seconds: 2));
-        
-        final user = Supabase.instance.client.auth.currentUser;
-        if (user != null) {
-          // Create or update profile
-          await Supabase.instance.client.from('profiles').upsert({
-            'id': user.id,
-            'email': user.email,
-            'name': user.userMetadata?['full_name'],
-            'updated_at': DateTime.now().toIso8601String(),
-          }).execute();
-          
-          if (mounted) {
-            Navigator.of(context).pushReplacementNamed('/home');
-          }
-        }
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${error.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -228,93 +114,205 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              lightBlue.withOpacity(0.3),
+              Colors.white,
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_ios),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Create an account ✨',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: lightBlue,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.local_parking_rounded,
+                        size: 48,
+                        color: primaryBlue,
+                      ),
+                    ),
                   ),
-                ),
-                const Text(
-                  'Welcome! Please enter your details.',
-                  style: TextStyle(
-                    color: Colors.grey,
-                    fontSize: 16,
+                  const SizedBox(height: 24),
+                  Text(
+                    'Create Account',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: primaryBlue,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 32),
-                Form(
-                  key: _formKey,
-                  child: Column(
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Please fill in the details to register',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  _buildTextField(
+                    controller: _nameController,
+                    label: 'Full Name',
+                    prefixIcon: Icons.person,
+                    validator: (value) {
+                      if (value == null || value.trim().isEmpty) {
+                        return 'Please enter your name';
+                      }
+                      if (value.trim().length < 2) {
+                        return 'Name must be at least 2 characters';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTextField(
+                    controller: _ageController,
+                    label: 'Age',
+                    prefixIcon: Icons.calendar_today,
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value?.isEmpty ?? true) {
+                        return 'Please enter your age';
+                      }
+                      final age = int.tryParse(value!);
+                      if (age == null || age < 18) {
+                        return 'Age must be 18 or above';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTextField(
+                    controller: _emailController,
+                    label: 'Email',
+                    prefixIcon: Icons.email,
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (value) {
+                      if (value?.isEmpty ?? true) return 'Please enter email';
+                      if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
+                          .hasMatch(value!)) {
+                        return 'Please enter a valid email';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildTextField(
+                    controller: _phoneController,
+                    label: 'Phone Number',
+                    prefixIcon: Icons.phone,
+                    keyboardType: TextInputType.phone,
+                    validator: (value) {
+                      if (value?.isEmpty ?? true) {
+                        return 'Please enter phone number';
+                      }
+                      if (!RegExp(r'^[0-9]{10}$').hasMatch(value!)) {
+                        return 'Please enter a valid 10-digit phone number';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildPasswordField(
+                    controller: _passwordController,
+                    label: 'Password',
+                    obscureText: _obscurePassword,
+                    onToggleVisibility: () {
+                      setState(() => _obscurePassword = !_obscurePassword);
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter a password';
+                      }
+                      if (!_validatePassword(value)) {
+                        return 'Password does not meet requirements';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildPasswordField(
+                    controller: _confirmPasswordController,
+                    label: 'Confirm Password',
+                    obscureText: _obscureConfirmPassword,
+                    onToggleVisibility: () {
+                      setState(() =>
+                          _obscureConfirmPassword = !_obscureConfirmPassword);
+                    },
+                    validator: (value) {
+                      if (value != _passwordController.text) {
+                        return 'Passwords do not match';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  _buildPasswordRequirements(),
+                  const SizedBox(height: 16),
+                  _buildVehicleTypeDropdown(),
+                  const SizedBox(height: 16),
+                  if (_selectedVehicleType != 'cycle') ...[
+                    _buildTextField(
+                      controller: _vehicleNumberController,
+                      label: 'Vehicle Number',
+                      prefixIcon: Icons.directions_car,
+                      validator: (value) => _selectedVehicleType != 'cycle' &&
+                              (value?.isEmpty ?? true)
+                          ? 'Please enter vehicle number'
+                          : null,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  _buildTextField(
+                    controller: _aadhaarController,
+                    label: 'Aadhaar Number',
+                    prefixIcon: Icons.credit_card,
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value?.isEmpty ?? true) {
+                        return 'Please enter Aadhaar number';
+                      }
+                      if (value!.length != 12) {
+                        return 'Aadhaar number must be 12 digits';
+                      }
+                      if (!RegExp(r'^[0-9]{12}$').hasMatch(value)) {
+                        return 'Invalid Aadhaar number';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  _buildRegisterButton(),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _buildTextField(
-                        controller: _nameController,
-                        label: 'Full Name',
-                        prefixIcon: Icons.person_outline,
+                      const Text('Already have an account?'),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pushReplacementNamed(context, '/login');
+                        },
+                        child: const Text('Login'),
                       ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _ageController,
-                        label: 'Age',
-                        prefixIcon: Icons.calendar_today,
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _emailController,
-                        label: 'Email',
-                        prefixIcon: Icons.email_outlined,
-                        keyboardType: TextInputType.emailAddress,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _phoneController,
-                        label: 'Phone Number',
-                        prefixIcon: Icons.phone_outlined,
-                        keyboardType: TextInputType.phone,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildDropdownField(),
-                      const SizedBox(height: 16),
-                      if (_selectedVehicleType != null && _selectedVehicleType != 'Cycle')
-                        _buildTextField(
-                          controller: _vehicleNumberController,
-                          label: 'Vehicle Number',
-                          prefixIcon: Icons.directions_car_outlined,
-                        ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _aadhaarController,
-                        label: 'Aadhaar Number',
-                        prefixIcon: Icons.credit_card_outlined,
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildPasswordField(),
-                      const SizedBox(height: 16),
-                      _buildConfirmPasswordField(),
-                      const SizedBox(height: 32),
-                      _buildRegisterButton(),
-                      const SizedBox(height: 24),
-                      _buildSocialLoginSection(),
-                      const SizedBox(height: 16),
-                      _buildLoginLink(),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -327,56 +325,152 @@ class _RegisterScreenState extends State<RegisterScreen> {
     required String label,
     required IconData prefixIcon,
     TextInputType? keyboardType,
-    bool isPassword = false,
+    String? Function(String?)? validator,
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),
             spreadRadius: 1,
             blurRadius: 3,
-            offset: const Offset(0, 1),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: TextFormField(
         controller: controller,
-        obscureText: isPassword,
-        keyboardType: keyboardType,
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please enter $label';
-          }
-          return null;
-        },
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(prefixIcon, color: Colors.blue),
+          labelStyle: TextStyle(color: primaryBlue),
+          prefixIcon: Icon(prefixIcon, color: primaryBlue),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
+            borderSide: BorderSide(color: primaryBlue),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryBlue.withOpacity(0.5)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryBlue, width: 2),
           ),
           filled: true,
           fillColor: Colors.white,
         ),
+        keyboardType: keyboardType,
+        validator: validator,
       ),
     );
   }
 
-  Widget _buildDropdownField() {
+  Widget _buildPasswordRequirements() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Password must contain:',
+          style: TextStyle(
+            color: Colors.grey,
+            fontSize: 12,
+          ),
+        ),
+        _buildRequirement('At least 8 characters', _hasMinLength),
+        _buildRequirement('At least one uppercase letter', _hasUpperCase),
+        _buildRequirement('At least one lowercase letter', _hasLowerCase),
+        _buildRequirement('At least one number', _hasNumber),
+        _buildRequirement('At least one special character', _hasSpecialChar),
+      ],
+    );
+  }
+
+  Widget _buildRequirement(String text, bool isMet) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 8, top: 4),
+      child: Row(
+        children: [
+          Icon(
+            isMet ? Icons.check_circle : Icons.check_circle_outline,
+            size: 12,
+            color: isMet ? Colors.green : Colors.grey,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            text,
+            style: TextStyle(
+              color: isMet ? Colors.green : Colors.grey,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPasswordField({
+    required TextEditingController controller,
+    required String label,
+    required bool obscureText,
+    required VoidCallback onToggleVisibility,
+    String? Function(String?)? validator,
+  }) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),
             spreadRadius: 1,
             blurRadius: 3,
-            offset: const Offset(0, 1),
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: TextFormField(
+        controller: controller,
+        obscureText: obscureText,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(color: primaryBlue),
+          prefixIcon: Icon(Icons.lock, color: primaryBlue),
+          suffixIcon: IconButton(
+            icon: Icon(
+              obscureText ? Icons.visibility : Icons.visibility_off,
+              color: primaryBlue,
+            ),
+            onPressed: onToggleVisibility,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryBlue.withOpacity(0.5)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryBlue, width: 2),
+          ),
+          filled: true,
+          fillColor: Colors.white,
+        ),
+        validator: validator,
+      ),
+    );
+  }
+
+  Widget _buildVehicleTypeDropdown() {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 3,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -384,72 +478,111 @@ class _RegisterScreenState extends State<RegisterScreen> {
         value: _selectedVehicleType,
         decoration: InputDecoration(
           labelText: 'Vehicle Type',
-          prefixIcon: const Icon(Icons.directions_bike_outlined, color: Colors.blue),
+          labelStyle: TextStyle(color: primaryBlue),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryBlue.withOpacity(0.5)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryBlue, width: 2),
           ),
           filled: true,
           fillColor: Colors.white,
         ),
-        items: _vehicleTypes.map((String type) {
-          return DropdownMenuItem<String>(
-            value: type,
-            child: Text(type),
-          );
-        }).toList(),
-        onChanged: (String? newValue) {
+        items: [
+          DropdownMenuItem(
+            value: 'cycle',
+            child: Row(
+              children: [
+                Icon(Icons.pedal_bike, color: primaryBlue),
+                const SizedBox(width: 8),
+                const Text('Cycle'),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'bike',
+            child: Row(
+              children: [
+                Icon(Icons.motorcycle, color: primaryBlue),
+                const SizedBox(width: 8),
+                const Text('Bike'),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'car',
+            child: Row(
+              children: [
+                Icon(Icons.directions_car, color: primaryBlue),
+                const SizedBox(width: 8),
+                const Text('Car'),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'bus',
+            child: Row(
+              children: [
+                Icon(Icons.directions_bus, color: primaryBlue),
+                const SizedBox(width: 8),
+                const Text('Bus'),
+              ],
+            ),
+          ),
+        ],
+        onChanged: (value) {
           setState(() {
-            _selectedVehicleType = newValue;
+            _selectedVehicleType = value!;
+            if (value == 'cycle') {
+              _vehicleNumberController.clear();
+              _aadhaarController.clear();
+            }
           });
         },
       ),
     );
   }
 
-  Widget _buildPasswordField() {
-    return _buildTextField(
-      controller: _passwordController,
-      label: 'Password',
-      prefixIcon: Icons.lock_outline,
-      isPassword: true,
-    );
-  }
-
-  Widget _buildConfirmPasswordField() {
-    return _buildTextField(
-      controller: _confirmPasswordController,
-      label: 'Confirm Password',
-      prefixIcon: Icons.lock_outline,
-      isPassword: true,
-    );
-  }
-
   Widget _buildRegisterButton() {
-    return SizedBox(
+    return Container(
       width: double.infinity,
+      height: 56,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          colors: [primaryBlue, secondaryBlue],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: primaryBlue.withOpacity(0.3),
+            spreadRadius: 1,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: ElevatedButton(
-        onPressed: _isLoading ? null : _handleRegister,
+        onPressed: _isLoading ? null : _register,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.blue,
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
         ),
         child: _isLoading
-            ? const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
+            ? const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               )
             : const Text(
-                'Sign Up',
+                'Register',
                 style: TextStyle(
-                  fontSize: 16,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
@@ -458,78 +591,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _buildSocialLoginSection() {
-    return Column(
-      children: [
-        const Row(
-          children: [
-            Expanded(child: Divider()),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Or sign up with',
-                style: TextStyle(color: Colors.grey),
-              ),
-            ),
-            Expanded(child: Divider()),
-          ],
-        ),
-        const SizedBox(height: 20),
-        OutlinedButton.icon(
-          onPressed: _signInWithGoogle,
-          icon: Icon(Icons.g_mobiledata, size: 24, color: Colors.blue.shade700),
-          label: const Text(
-            'Continue with Google',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: Colors.black87,
-            ),
-          ),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            side: BorderSide(color: Colors.grey.shade300),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLoginLink() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text('Already have an account?'),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text(
-            'Log in',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.blue,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   void dispose() {
-    // Dispose controllers
+    _passwordController.removeListener(_checkPasswordStrength);
+    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
-    _nameController.dispose();
+    _confirmPasswordController.dispose();
     _ageController.dispose();
-    _phoneController.dispose();
     _vehicleNumberController.dispose();
     _aadhaarController.dispose();
-    _confirmPasswordController.dispose();
-    
+    _phoneController.dispose();
     super.dispose();
   }
 }

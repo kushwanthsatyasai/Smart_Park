@@ -1,20 +1,59 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import './register_screen.dart';
+import 'dart:convert';
+import 'dart:async';
+import '../home/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final Map<String, dynamic>? redirectData;
+
+  const LoginScreen({
+    super.key,
+    this.redirectData,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  bool _isLoading = false;
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _passwordVisible = false;
+  bool _isLoading = false;
+  bool _obscurePassword = true;
+  late final SupabaseClient _supabase;
+
+  @override
+  void initState() {
+    super.initState();
+    _supabase = Supabase.instance.client;
+    _checkRedirectData();
+    // Debug information
+    print('Checking Supabase connection...');
+    print('Supabase URL: ${Supabase.instance.client.supabaseUrl}');
+  }
+
+  void _checkRedirectData() {
+    if (widget.redirectData != null) {
+      try {
+        // Validate redirect data
+        final redirectTo = widget.redirectData!['redirectTo'] as String?;
+        if (redirectTo != null) {
+          final parkingData = widget.redirectData!['parkingData'];
+          if (parkingData != null) {
+            // Ensure parking data is valid JSON
+            json.encode(parkingData); // This will throw if invalid
+          }
+        }
+      } catch (e) {
+        print('Invalid redirect data: $e');
+        // Clear invalid redirect data
+        widget.redirectData?.clear();
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,12 +106,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         label: 'Password',
                         prefixIcon: Icons.lock_outline,
                         isPassword: true,
-                        passwordVisible: _passwordVisible,
-                        onTogglePassword: () {
-                          setState(() {
-                            _passwordVisible = !_passwordVisible;
-                          });
-                        },
                         validator: (value) {
                           if (value == null || value.isEmpty) {
                             return 'Please enter your password';
@@ -106,8 +139,6 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData prefixIcon,
     TextInputType? keyboardType,
     bool isPassword = false,
-    bool? passwordVisible,
-    VoidCallback? onTogglePassword,
     String? Function(String?)? validator,
   }) {
     return Container(
@@ -125,7 +156,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
       child: TextFormField(
         controller: controller,
-        obscureText: isPassword && !(passwordVisible ?? false),
+        obscureText: isPassword ? _obscurePassword : false,
         keyboardType: keyboardType,
         validator: validator,
         decoration: InputDecoration(
@@ -134,12 +165,14 @@ class _LoginScreenState extends State<LoginScreen> {
           suffixIcon: isPassword
               ? IconButton(
                   icon: Icon(
-                    passwordVisible ?? false
-                        ? Icons.visibility_off
-                        : Icons.visibility,
-                    color: Colors.grey,
+                    _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                    color: Colors.blue,
                   ),
-                  onPressed: onTogglePassword,
+                  onPressed: () {
+                    setState(() {
+                      _obscurePassword = !_obscurePassword;
+                    });
+                  },
                 )
               : null,
           border: OutlineInputBorder(
@@ -157,7 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
-        onPressed: _isLoading ? null : _handleLogin,
+        onPressed: _isLoading ? null : _signIn,
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.blue,
           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -247,93 +280,190 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Future<void> _handleLogin() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
+  Future<void> _signIn() async {
     try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      // Validate input
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+
+      if (email.isEmpty || password.isEmpty) {
+        throw 'Please fill in all fields';
+      }
+
+      if (!email.contains('@')) {
+        throw 'Please enter a valid email address';
+      }
+
+      if (password.length < 6) {
+        throw 'Password must be at least 6 characters';
+      }
+
       final supabase = Supabase.instance.client;
 
-      final authResponse = await supabase.auth.signInWithPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+      // Attempt to sign in
+      final AuthResponse res = await supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
       );
 
-      if (authResponse.user != null) {
-        // Check if email is verified
-        if (authResponse.user!.emailConfirmedAt == null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Please verify your email before logging in'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-            return;
-          }
-        }
-
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/home');
-        }
+      if (res.user == null) {
+        throw 'Authentication failed';
       }
-    } on AuthException catch (error) {
-      if (mounted) {
-        String errorMessage = error.message;
-        if (error.message.contains('Invalid login credentials')) {
-          errorMessage = 'Invalid email or password. Please try again.';
-        } else if (error.message.contains('Email not confirmed')) {
-          errorMessage = 'Please verify your email before logging in.';
-        }
 
+      // Get user profile to check role
+      final profileResponse = await supabase
+          .from('profiles')
+          .select('role, name')
+          .eq('id', res.user!.id)
+          .single();
+
+      final userRole = profileResponse['role'] as String?;
+      final userName = profileResponse['name'] as String?;
+
+      if (mounted) {
+        // Clear any existing error messages
+        ScaffoldMessenger.of(context).clearSnackBars();
+
+        // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMessage),
+            content: Text('Welcome back, ${userName ?? 'User'}!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        // Navigate based on role
+        if (userRole == 'admin') {
+          Navigator.of(context).pushReplacementNamed('/admin/dashboard');
+        } else {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
+      }
+    } on AuthException catch (e) {
+      print('AuthException: ${e.message}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } catch (error) {
+    } catch (e) {
+      print('Error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${error.toString()}'),
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
   Future<void> _signInWithGoogle() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+
     try {
-      await Supabase.instance.client.auth.signInWithOAuth(
+      // Create a completer to handle the auth state change
+      final completer = Completer<void>();
+      StreamSubscription? subscription;
+
+      subscription = _supabase.auth.onAuthStateChange.listen((data) async {
+        print('Auth State Changed: ${data.event}');
+        print('Session User: ${data.session?.user.email}');
+
+        if (data.event == AuthChangeEvent.signedIn) {
+          if (!completer.isCompleted) {
+            completer.complete();
+          }
+          subscription?.cancel();
+
+          if (mounted) {
+            try {
+              // Create/update profile
+              final user = data.session!.user;
+              await _supabase.from('profiles').upsert({
+                'id': user.id,
+                'email': user.email,
+                'name': user.userMetadata?['full_name'] ??
+                    user.email?.split('@')[0] ??
+                    '',
+                'role': 'customer',
+                'created_at': DateTime.now().toIso8601String(),
+                'updated_at': DateTime.now().toIso8601String(),
+              });
+
+              // Schedule navigation for next frame
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Successfully signed in!'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  Navigator.of(context).pushReplacementNamed('/home');
+                }
+              });
+            } catch (e) {
+              print('Profile update error: $e');
+            }
+          }
+        }
+      });
+
+      // Start OAuth flow
+      final response = await _supabase.auth.signInWithOAuth(
         Provider.google,
-        redirectTo: 'io.supabase.flutterquickstart://login-callback/',
+        redirectTo: 'com.smartparking.app://login-callback/',
         queryParams: {
           'access_type': 'offline',
           'prompt': 'consent',
         },
       );
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please complete the sign in in your browser'),
-            duration: Duration(seconds: 5),
-          ),
-        );
+      print('OAuth Response: $response');
+
+      if (!response) {
+        throw 'Google sign in failed';
       }
-    } catch (error) {
+
+      // Wait for auth state change or timeout
+      await Future.any([
+        completer.future,
+        Future.delayed(const Duration(seconds: 60)),
+      ]).then((_) {
+        subscription?.cancel();
+      }).catchError((e) {
+        subscription?.cancel();
+        throw e;
+      });
+    } catch (e) {
+      print('OAuth error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${error.toString()}'),
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }

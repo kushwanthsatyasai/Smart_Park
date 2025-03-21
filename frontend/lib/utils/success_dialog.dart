@@ -6,10 +6,10 @@ class SuccessDialog extends StatelessWidget {
   final VoidCallback? onDismissed;
 
   const SuccessDialog({
-    Key? key,
+    super.key,
     required this.message,
     this.onDismissed,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
