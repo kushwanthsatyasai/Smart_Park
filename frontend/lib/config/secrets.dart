@@ -1,6 +1,14 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class Secrets {
-  static const String GOOGLE_MAPS_API_KEY = 'AIzaSyAcxQe76AcTZDawEcwn0dWtM7VDSLf-pZk';
+  static String get GOOGLE_MAPS_API_KEY => 
+      dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
   
-  // Add other sensitive keys here
-  static const String FIREBASE_DB_URL = 'YOUR_FIREBASE_URL';
+  static String get FIREBASE_DB_URL => 
+      dotenv.env['FIREBASE_DB_URL'] ?? '';
+  
+  static bool isValid() {
+    return GOOGLE_MAPS_API_KEY.isNotEmpty && 
+           FIREBASE_DB_URL.isNotEmpty;
+  }
 } 

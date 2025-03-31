@@ -20,8 +20,19 @@ import 'screens/booking/booking_screen.dart';
 import 'screens/booking/booking_history_screen.dart';
 import 'utils/app_state.dart';
 import 'screens/payment/payment_screen.dart';
+import 'package:smart_parking_app/config/supabase_config.dart';
+import 'package:smart_parking_app/config/secrets.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Preload the font
+  await GoogleFonts.pendingFonts([
+    GoogleFonts.roboto(),
+    GoogleFonts.roboto(fontWeight: FontWeight.w500),
+    GoogleFonts.roboto(fontWeight: FontWeight.w700),
+  ]);
+
   runApp(const LoadingApp());
   _initializeApp();
 }
@@ -30,12 +41,20 @@ Future<void> _initializeApp() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
 
-    // Load environment variables
+    // Load environment variables first
     await dotenv.load(fileName: ".env");
 
+    // Validate configurations
+    if (!SupabaseConfig.isValid()) {
+      throw 'Invalid Supabase configuration';
+    }
+    if (!Secrets.isValid()) {
+      throw 'Invalid Secrets configuration';
+    }
+
     await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL']!,
-      anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+      url: SupabaseConfig.url,
+      anonKey: SupabaseConfig.anonKey,
       authFlowType: AuthFlowType.pkce,
     );
 

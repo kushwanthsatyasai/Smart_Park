@@ -1,10 +1,18 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class SupabaseConfig {
-  static const String url = 'https://ubqrfmyvutvstgxeubvr.supabase.co';
-  static const String anonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVicXJmbXl2dXR2c3RneGV1YnZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkyNzc1MDgsImV4cCI6MjA1NDg1MzUwOH0.3wU-ZJFNSJZIoL2DdrlJjbmb1799ElBtt_IXNwXf-ek';
-  static const String redirectUrl = 'com.smartparking.app://login-callback/';
+  static String get url => 
+      dotenv.env['SUPABASE_URL'] ?? '';
+      
+  static String get anonKey => 
+      dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+      
+  static String get redirectUrl => 
+      dotenv.env['SUPABASE_REDIRECT_URL'] ?? '';
   
   static bool isValid() {
-    return url.isNotEmpty && anonKey.isNotEmpty;
+    return url.isNotEmpty && 
+           anonKey.isNotEmpty && 
+           redirectUrl.isNotEmpty;
   }
 } 
