@@ -16,7 +16,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Updated to latest version
 
       - name: Set up Java
         uses: actions/setup-java@v3
@@ -30,7 +30,6 @@ jobs:
           flutter-version: '3.27.1'
           channel: 'stable'
           cache: true
-          working-directory: ./SmartPark/frontend
 
       - name: Install dependencies
         run: flutter pub get
@@ -42,16 +41,16 @@ jobs:
         run: flutter build apk --release
 
       - name: Upload APK
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Updated to latest version
         with:
           name: app-release
-          path: SmartPark/frontend/build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ github.workspace }}/SmartPark/frontend/build/app/outputs/flutter-apk/app-release.apk
 
       - name: Build App Bundle
         run: flutter build appbundle --release
       
       - name: Upload App Bundle
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Updated to latest version
         with:
           name: app-bundle-release
-          path: SmartPark/frontend/build/app/outputs/bundle/release/app-release.aab 
+          path: ${{ github.workspace }}/SmartPark/frontend/build/app/outputs/bundle/release/app-release.aab
