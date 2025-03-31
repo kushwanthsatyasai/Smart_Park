@@ -10,9 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ github.workspace }}/SmartPark/frontend
     
     steps:
       - name: Checkout code
@@ -21,10 +18,7 @@ jobs:
           fetch-depth: 0
 
       - name: Debug Directory Structure
-        run: ls -R ${{ github.workspace }}
-
-      - name: Ensure frontend directory exists
-        run: mkdir -p ${{ github.workspace }}/SmartPark/frontend
+        run: ls -R
 
       - name: Set up Java
         uses: actions/setup-java@v3
@@ -39,26 +33,36 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Navigate to frontend directory
+        run: |
+          cd frontend
+          echo "Current directory: $(pwd)"
+          ls -la
+
       - name: Install dependencies
+        working-directory: ./frontend
         run: flutter pub get
 
       - name: Run tests
+        working-directory: ./frontend
         run: flutter test || true  
 
       - name: Build APK
+        working-directory: ./frontend
         run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: app-release
-          path: ${{ github.workspace }}/SmartPark/frontend/build/app/outputs/flutter-apk/app-release.apk
+          path: ./frontend/build/app/outputs/flutter-apk/app-release.apk
 
       - name: Build App Bundle
+        working-directory: ./frontend
         run: flutter build appbundle --release
       
       - name: Upload App Bundle
         uses: actions/upload-artifact@v4
         with:
           name: app-bundle-release
-          path: ${{ github.workspace }}/SmartPark/frontend/build/app/outputs/bundle/release/app-release.aab
+          path: ./frontend/build/app/outputs/bundle/release/app-release.aab
