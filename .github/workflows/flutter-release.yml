@@ -1,0 +1,51 @@
+name: Flutter Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.27.1'
+          channel: 'stable'
+          cache: true
+      
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: flutter pub get
+      
+      - name: Build APK
+        working-directory: ./frontend
+        run: flutter build apk --release
+      
+      - name: Rename APK
+        working-directory: ./frontend
+        run: |
+          mkdir -p build/release
+          cp build/app/outputs/flutter-apk/app-release.apk build/release/smart_parking_app-${{ github.ref_name }}.apk
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ./frontend/build/release/smart_parking_app-${{ github.ref_name }}.apk
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
