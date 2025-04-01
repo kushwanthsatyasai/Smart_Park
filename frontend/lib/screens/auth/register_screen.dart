@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../config/supabase_config.dart';
 
 const Color primaryBlue = Color(0xFF1A73E8);
 const Color secondaryBlue = Color(0xFF4285F4);
@@ -65,49 +66,88 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // Step 1: Sign up the user
-      final res = await _supabase.auth.signUp(
+      // Create auth user
+      final AuthResponse res = await _supabase.auth.signUp(
         email: _emailController.text.trim(),
-        password: _passwordController.text,
+        password: _passwordController.text.trim(),
+        emailRedirectTo: SupabaseConfig.redirectUrl,
+        data: {
+          'name': _nameController.text.trim(),
+          'age': int.tryParse(_ageController.text.trim()),
+          'vehicle_type': _selectedVehicleType,
+          'vehicle_number': _vehicleNumberController.text.trim(),
+          'aadhaar_number': _aadhaarController.text.trim(),
+          'phone_number': _phoneController.text.trim(),
+        },
       );
 
-      if (res.user == null) throw 'Registration failed';
+      if (res.user != null) {
+        // Create profile record
+        await _supabase.from('profiles').insert({
+          'id': res.user!.id,
+          'name': _nameController.text.trim(),
+          'age': int.tryParse(_ageController.text.trim()),
+          'vehicle_type': _selectedVehicleType,
+          'vehicle_number': _vehicleNumberController.text.trim(),
+          'aadhaar_number': _aadhaarController.text.trim(),
+          'phone_number': _phoneController.text.trim(),
+          'email': _emailController.text.trim(),
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+          'role': 'customer'
+        });
 
-      // Step 2: Create profile with all required fields
-      await _supabase.from('profiles').insert({
-        'id': res.user!.id,
-        'email': _emailController.text.trim(),
-        'name': _nameController.text.trim(),
-        'phone_number': _phoneController.text.trim(),
-        'aadhaar_number': _aadhaarController.text.trim(),
-        'age': int.parse(_ageController.text),
-        'vehicle_type': _selectedVehicleType,
-        'vehicle_number': _vehicleNumberController.text.trim(),
-        'role': 'customer',
-        'created_at': DateTime.now().toIso8601String(),
-      });
-
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Registration successful! Please check your email for the confirmation link. '
+                'Click the link to verify your account. The link will open in your Smart Park app.',
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 8),
+            ),
+          );
+          Navigator.of(context).pushReplacementNamed('/login');
+        }
+      }
+    } on AuthException catch (e) {
       if (mounted) {
+        String errorMessage = 'Registration failed';
+        
+        if (e.message.contains('already exists')) {
+          errorMessage = 'An account with this email already exists. Please login or use a different email.';
+        } else if (e.message.contains('network')) {
+          errorMessage = 'Please check your internet connection and try again.';
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Registration successful! Please login.'),
-            backgroundColor: Colors.green,
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+            action: e.message.contains('network') ? SnackBarAction(
+              label: 'Retry',
+              onPressed: _register,
+            ) : null,
           ),
         );
-        Navigator.of(context).pushReplacementNamed('/login');
       }
     } catch (e) {
-      print('Registration error: $e');
+      print('Registration error: $e'); // Add debug log
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 

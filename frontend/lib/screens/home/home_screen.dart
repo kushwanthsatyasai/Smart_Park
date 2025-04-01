@@ -6,6 +6,8 @@ import '../profile/complete_profile_screen.dart';
 import '../scanner_screen.dart';
 import '../booking/booking_confirmation_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../services/profile_service.dart';
+import '../profile/profile_completion_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,12 +22,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = true;
   bool isAdmin = false;
   Map<String, dynamic>? _activeBooking;
+  final _profileService = ProfileService();
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _loadActiveBooking();
+    _checkProfileCompletion();
   }
 
   Future<void> _loadUserData() async {
@@ -69,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
             parking_slots!parking_bookings_slot_id_fkey (*)
           ''')
           .eq('user_id', userId)
-          .in_('status', ['pending', 'active'])
+          .or('status.eq.pending,status.eq.active')
           .order('created_at', ascending: false)
           .limit(1)
           .maybeSingle();
@@ -195,6 +199,27 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _checkProfileCompletion() async {
+    final profile = await _profileService.getUserProfile();
+    final isComplete = await _profileService.isProfileComplete();
+
+    if (!isComplete && mounted) {
+      // Show profile completion screen
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => WillPopScope(
+          onWillPop: () async => false, // Prevent back button
+          child: Dialog(
+            child: ProfileCompletionScreen(
+              existingProfile: profile,
+            ),
+          ),
+        ),
+      );
     }
   }
 

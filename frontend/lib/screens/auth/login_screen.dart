@@ -32,7 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkRedirectData();
     // Debug information
     print('Checking Supabase connection...');
-    print('Supabase URL: ${Supabase.instance.client.supabaseUrl}');
+    print('Supabase URL: ${_supabase.rest.url}');
   }
 
   void _checkRedirectData() {
@@ -373,94 +373,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signInWithGoogle() async {
-    if (_isLoading) return;
-    setState(() => _isLoading = true);
-
     try {
-      // Create a completer to handle the auth state change
-      final completer = Completer<void>();
-      StreamSubscription? subscription;
-
-      subscription = _supabase.auth.onAuthStateChange.listen((data) async {
-        print('Auth State Changed: ${data.event}');
-        print('Session User: ${data.session?.user.email}');
-
-        if (data.event == AuthChangeEvent.signedIn) {
-          if (!completer.isCompleted) {
-            completer.complete();
-          }
-          subscription?.cancel();
-
-          if (mounted) {
-            try {
-              // Create/update profile
-              final user = data.session!.user;
-              await _supabase.from('profiles').upsert({
-                'id': user.id,
-                'email': user.email,
-                'name': user.userMetadata?['full_name'] ??
-                    user.email?.split('@')[0] ??
-                    '',
-                'role': 'customer',
-                'created_at': DateTime.now().toIso8601String(),
-                'updated_at': DateTime.now().toIso8601String(),
-              });
-
-              // Schedule navigation for next frame
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Successfully signed in!'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                  Navigator.of(context).pushReplacementNamed('/home');
-                }
-              });
-            } catch (e) {
-              print('Profile update error: $e');
-            }
-          }
-        }
-      });
-
-      // Start OAuth flow
-      final response = await _supabase.auth.signInWithOAuth(
-        Provider.google,
-        redirectTo: 'com.smartparking.app://login-callback/',
-        queryParams: {
-          'access_type': 'offline',
-          'prompt': 'consent',
-        },
+      setState(() => _isLoading = true);
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: 'com.smartparking.app://login-callback',
       );
-
-      print('OAuth Response: $response');
-
-      if (!response) {
-        throw 'Google sign in failed';
-      }
-
-      // Wait for auth state change or timeout
-      await Future.any([
-        completer.future,
-        Future.delayed(const Duration(seconds: 60)),
-      ]).then((_) {
-        subscription?.cancel();
-      }).catchError((e) {
-        subscription?.cancel();
-        throw e;
-      });
     } catch (e) {
-      print('OAuth error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error signing in with Google: $e')),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

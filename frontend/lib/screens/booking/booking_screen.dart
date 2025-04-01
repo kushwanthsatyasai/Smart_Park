@@ -20,16 +20,67 @@ class BookingScreen extends StatefulWidget {
 class _BookingScreenState extends State<BookingScreen> {
   bool _isLoading = false;
   Map<String, dynamic>? _assignedSlot;
+  TimeOfDay? _selectedTime;
+  int _selectedDuration = 1;
+
+  Future<void> _selectTime() async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      builder: (BuildContext context, Widget? child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            timePickerTheme: TimePickerThemeData(
+              backgroundColor: Colors.white,
+              hourMinuteTextColor: Colors.blue,
+              dayPeriodTextColor: Colors.blue,
+              dialHandColor: Colors.blue,
+              dialBackgroundColor: Colors.grey.shade200,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.blue,
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedTime = picked;
+        // Calculate duration based on current time and selected time
+        final now = TimeOfDay.now();
+        int selectedMinutes = picked.hour * 60 + picked.minute;
+        int currentMinutes = now.hour * 60 + now.minute;
+        int durationMinutes = selectedMinutes - currentMinutes;
+        if (durationMinutes <= 0) {
+          // If selected time is earlier than current time, assume it's for next day
+          durationMinutes += 24 * 60;
+        }
+        _selectedDuration = (durationMinutes / 60).ceil();
+      });
+    }
+  }
 
   Future<void> _getAvailableSlot(String parkingLotId, String vehicleType) async {
     setState(() => _isLoading = true);
     try {
       final supabase = Supabase.instance.client;
 
-      // Get all available slots for the vehicle type
+      // Get all available slots for the vehicle type with all necessary fields
       final response = await supabase
           .from('parking_slots')
-          .select()
+          .select('''
+            id,
+            slot_number,
+            vehicle_type,
+            is_available,
+            rate_per_hour,
+            parking_lot_id
+          ''')
           .eq('parking_lot_id', parkingLotId)
           .eq('vehicle_type', vehicleType)
           .eq('is_available', true);
@@ -48,9 +99,15 @@ class _BookingScreenState extends State<BookingScreen> {
         return;
       }
 
+      // Debug print to check slot data
+      print('Available slots: $slots');
+
       // Randomly select one available slot
       final random = Random();
       final selectedSlot = slots[random.nextInt(slots.length)];
+      
+      // Debug print selected slot
+      print('Selected slot: $selectedSlot');
 
       setState(() {
         _assignedSlot = selectedSlot;
@@ -89,7 +146,7 @@ class _BookingScreenState extends State<BookingScreen> {
       final verificationCode = (100000 + Random().nextInt(900000)).toString();
       
       final now = DateTime.now();
-      final totalFee = _assignedSlot!['rate_per_hour'] * 1.0;
+      final totalFee = _assignedSlot!['rate_per_hour'] * _selectedDuration.toDouble();
 
       // Debug print to check values
       print('Inserting booking with:');
@@ -107,7 +164,7 @@ class _BookingScreenState extends State<BookingScreen> {
             'entry_time': null,
             'exit_time': null,
             'amount': _assignedSlot!['rate_per_hour'],
-            'duration': 1,
+            'duration': _selectedDuration,
             'total_fee': totalFee,
             'status': 'pending',
             'verification_code': verificationCode,
@@ -124,17 +181,28 @@ class _BookingScreenState extends State<BookingScreen> {
           .update({'is_available': false})
           .eq('id', _assignedSlot!['id']);
 
+      // Get user details
+      final userResponse = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', supabase.auth.currentUser!.id)
+          .single();
+
+      // Prepare booking details for QR screen
+      final bookingDetails = {
+        ...bookingResponse,
+        'user_name': userResponse['name'],
+        'phone_number': userResponse['phone_number'],
+        'vehicle_number': _assignedSlot!['slot_number'],
+      };
+
       if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => BookingConfirmationScreen(
-              bookingDetails: bookingResponse,
-              parkingLot: widget.parkingData,
-              assignedSlot: _assignedSlot!,
-            ),
-          ),
-        );
+        Navigator.pop(context, {
+          'success': true,
+          'booking_details': bookingDetails,
+          'parking_lot': widget.parkingData,
+          'assigned_slot': _assignedSlot,
+        });
       }
     } catch (e) {
       print('Error booking slot: $e');
@@ -189,11 +257,11 @@ class _BookingScreenState extends State<BookingScreen> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'Rate: ₹${widget.parkingData['rate_per_hour']}/hour',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
                     if (_assignedSlot != null) ...[
+                      Text(
+                        'Rate: ₹${_assignedSlot!['rate_per_hour']}/hour',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 16),
                       Text(
                         'Assigned Slot: ${_assignedSlot!['slot_number']}',
@@ -201,6 +269,56 @@ class _BookingScreenState extends State<BookingScreen> {
                               color: Colors.green,
                             ),
                       ),
+                      const SizedBox(height: 16),
+                      InkWell(
+                        onTap: _selectTime,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Select Parking Duration',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Row(
+                                children: [
+                                  Icon(Icons.access_time, color: Colors.blue),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _selectedTime != null
+                                        ? 'Until ${_selectedTime!.format(context)}'
+                                        : 'Select Time',
+                                    style: TextStyle(
+                                      color: Colors.blue,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (_selectedTime != null) ...[
+                        Text(
+                          'Duration: $_selectedDuration hour${_selectedDuration > 1 ? 's' : ''}',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Total Fee: ₹${(_assignedSlot!['rate_per_hour'] * _selectedDuration).toStringAsFixed(2)}',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green,
+                              ),
+                        ),
+                      ],
                     ],
                   ],
                 ),
@@ -222,7 +340,7 @@ class _BookingScreenState extends State<BookingScreen> {
               const SizedBox(height: 16),
               CustomButton(
                 text: 'Confirm Booking',
-                onPressed: _isLoading ? null : _bookSlot,
+                onPressed: (_isLoading || _selectedTime == null) ? null : _bookSlot,
                 isLoading: _isLoading,
               ),
             ],

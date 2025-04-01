@@ -4,6 +4,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import './booking_screen.dart';
+import '../qr_display_screen.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -24,6 +26,11 @@ class _MapScreenState extends State<MapScreen> {
   final Completer<GoogleMapController> _controllerCompleter = Completer();
   double _searchRadius = 2000; // Default radius 2km in meters
   List<Map<String, dynamic>> _allParkingLots = []; // Store all parking lots
+
+  static const CameraPosition _defaultLocation = CameraPosition(
+    target: LatLng(20.5937, 78.9629), // Default to India's center
+    zoom: 5,
+  );
 
   // Add radius options
   final List<Map<String, dynamic>> _radiusOptions = [
@@ -215,17 +222,6 @@ class _MapScreenState extends State<MapScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            if (lot['description'] != null) ...[
-              Text(
-                lot['description'],
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
             Row(
               children: [
                 Expanded(
@@ -242,7 +238,7 @@ class _MapScreenState extends State<MapScreen> {
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: availableSlots > 0
-                        ? () => _navigateToBooking(lot, distance)
+                        ? () => _navigateToBooking(lot)
                         : null,
                     icon: const Icon(Icons.book_online),
                     label: const Text('Book Now'),
@@ -278,40 +274,100 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _navigateToBooking(Map<String, dynamic> lot, double distance) {
+  void _navigateToBooking(Map<String, dynamic> lot) async {
     Navigator.pop(context); // Close bottom sheet
-    Navigator.pushNamed(
+    final result = await Navigator.push(
       context,
-      '/booking',
-      arguments: {
-        'parking_lot': lot,
-        'distance': distance,
-      },
+      MaterialPageRoute(
+        builder: (context) => BookingScreen(parkingData: lot),
+      ),
     );
+
+    if (result != null && result['success'] == true) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => QRDisplayScreen(
+              booking: result['booking_details'],
+              parkingLotName: lot['name'],
+              slotNumber: result['assigned_slot']['slot_number'],
+              bookingTime: DateTime.parse(result['booking_details']['booking_time']),
+              duration: result['booking_details']['duration'],
+              totalFee: result['booking_details']['total_fee'].toString(),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   void _updateMarkers() {
-    final markers = _parkingLots.map((lot) {
-      final slots = lot['parking_slots'] as List;
-      final availableSlots =
-          slots.where((slot) => slot['is_available'] == true).length;
+    if (_currentPosition == null) return;
 
-      return Marker(
-        markerId: MarkerId(lot['id'].toString()),
-        position: LatLng(
-          double.parse(lot['latitude'].toString()),
-          double.parse(lot['longitude'].toString()),
+    final Set<Marker> markers = {};
+    final Set<Circle> circles = {};
+
+    // Add current location circle (solid blue)
+    circles.add(
+      Circle(
+        circleId: const CircleId('current_location'),
+        center: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+        radius: 20, // 20 meters radius for current location
+        fillColor: Colors.blue.withOpacity(0.3),
+        strokeColor: Colors.white,
+        strokeWidth: 2,
+      ),
+    );
+
+    // Add search radius circle (transparent blue)
+    circles.add(
+      Circle(
+        circleId: const CircleId('search_area'),
+        center: LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+        radius: _searchRadius,
+        fillColor: Colors.blue.withOpacity(0.1),
+        strokeColor: Colors.blue,
+        strokeWidth: 1,
+      ),
+    );
+
+    // Add parking lot markers with custom colors based on availability
+    for (final lot in _parkingLots) {
+      final slots = lot['parking_slots'] as List;
+      final availableSlots = slots.where((slot) => slot['is_available'] == true).length;
+      final totalSlots = slots.length;
+      
+      // Determine marker color based on availability percentage
+      double hue;
+      if (availableSlots == 0) {
+        hue = BitmapDescriptor.hueRed; // No slots available
+      } else if (availableSlots == totalSlots) {
+        hue = BitmapDescriptor.hueGreen; // All slots available
+      } else {
+        hue = BitmapDescriptor.hueYellow; // Some slots available
+      }
+      
+      markers.add(
+        Marker(
+          markerId: MarkerId('lot_${lot['id']}'),
+          position: LatLng(
+            double.parse(lot['latitude'].toString()),
+            double.parse(lot['longitude'].toString()),
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+          onTap: () => _showParkingDetails(lot),
+          infoWindow: InfoWindow(
+            title: lot['name'],
+            snippet: '$availableSlots/$totalSlots slots available',
+          ),
         ),
-        icon: BitmapDescriptor.defaultMarkerWithHue(availableSlots > 0
-            ? BitmapDescriptor.hueGreen
-            : BitmapDescriptor.hueRed),
-        onTap: () => _showParkingDetails(lot),
       );
-    }).toSet();
+    }
 
     setState(() {
       _markers = markers;
-      _updateCircleRadius(); // Update the circle when markers are updated
+      _circles = circles;
     });
   }
 
@@ -394,7 +450,6 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // Update the build method to add a prominent filter button
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -405,43 +460,55 @@ class _MapScreenState extends State<MapScreen> {
             icon: const Icon(Icons.refresh),
             onPressed: _initializeMap,
           ),
+          IconButton(
+            icon: const Icon(Icons.filter_list),
+            onPressed: _showFilterBottomSheet,
+          ),
         ],
       ),
       body: Stack(
         children: [
-          if (_isMapReady)
+          if (!_isMapReady)
+            const Center(
+              child: CircularProgressIndicator(),
+            )
+          else
             GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: _currentPosition != null
-                    ? LatLng(
+              initialCameraPosition: _currentPosition != null
+                  ? CameraPosition(
+                      target: LatLng(
                         _currentPosition!.latitude,
                         _currentPosition!.longitude,
-                      )
-                    : const LatLng(20.5937, 78.9629),
-                zoom: 15,
-              ),
+                      ),
+                      zoom: 15,
+                    )
+                  : const CameraPosition(
+                      target: LatLng(20.5937, 78.9629),
+                      zoom: 5,
+                    ),
+              myLocationEnabled: false, // Using custom marker for location
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: true,
+              markers: _markers,
+              circles: _circles,
               onMapCreated: (GoogleMapController controller) {
-                _controllerCompleter.complete(controller);
                 _mapController = controller;
+                _controllerCompleter.complete(controller);
                 if (_currentPosition != null) {
                   controller.animateCamera(
-                    CameraUpdate.newLatLng(
+                    CameraUpdate.newLatLngZoom(
                       LatLng(
                         _currentPosition!.latitude,
                         _currentPosition!.longitude,
                       ),
+                      15,
                     ),
                   );
                 }
+                _updateMarkers();
               },
-              markers: _markers,
-              circles: _circles,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: true,
-              compassEnabled: true,
             ),
-          // Radius indicator and filter button
+          // Search radius indicator
           Positioned(
             top: 16,
             left: 16,
@@ -485,16 +552,37 @@ class _MapScreenState extends State<MapScreen> {
           ),
           if (_isLoading)
             Container(
-              color: Colors.black.withOpacity(0.5),
+              color: Colors.black.withOpacity(0.3),
               child: const Center(
                 child: CircularProgressIndicator(),
               ),
             ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _initializeMap,
-        child: const Icon(Icons.my_location),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            onPressed: () {
+              if (_currentPosition != null && _mapController != null) {
+                _mapController!.animateCamera(
+                  CameraUpdate.newLatLngZoom(
+                    LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
+                    15,
+                  ),
+                );
+              }
+            },
+            heroTag: 'location',
+            child: const Icon(Icons.my_location),
+          ),
+          const SizedBox(height: 16),
+          FloatingActionButton(
+            onPressed: _initializeMap,
+            heroTag: 'refresh',
+            child: const Icon(Icons.refresh),
+          ),
+        ],
       ),
     );
   }
@@ -516,7 +604,6 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _parkingLots = nearbyLots;
       _updateMarkers();
-      _updateCircleRadius();
     });
 
     // Adjust map zoom based on radius
@@ -552,54 +639,39 @@ class _MapScreenState extends State<MapScreen> {
     return 14.0; // for 2km
   }
 
-  // Add this method to the _MapScreenState class
-  void _updateCircleRadius() {
-    if (_currentPosition == null) return;
-
-    final circles = {
-      Circle(
-        circleId: const CircleId('searchRadius'),
-        center: LatLng(
-          _currentPosition!.latitude,
-          _currentPosition!.longitude,
-        ),
-        radius: _searchRadius,
-        fillColor: Colors.blue.withOpacity(0.1),
-        strokeColor: Colors.blue.withOpacity(0.3),
-        strokeWidth: 1,
-      ),
-      Circle(
-        circleId: const CircleId('userLocation'),
-        center: LatLng(
-          _currentPosition!.latitude,
-          _currentPosition!.longitude,
-        ),
-        radius: 10,
-        fillColor: Colors.blue,
-        strokeColor: Colors.white,
-        strokeWidth: 2,
-      ),
-    };
-
-    setState(() {
-      _circles = circles;
-    });
-
-    // Adjust map camera to show the entire search radius
-    if (_mapController != null) {
-      _mapController!.animateCamera(
-        CameraUpdate.newLatLngZoom(
-          LatLng(_currentPosition!.latitude, _currentPosition!.longitude),
-          _getZoomLevel(_searchRadius),
-        ),
-      );
-    }
-  }
-
   @override
   void dispose() {
     _mapController?.dispose();
     super.dispose();
+  }
+
+  Future<int> _getAvailableSlots(String lotId) async {
+    try {
+      final response = await _supabase
+          .from('parking_slots')
+          .select()
+          .eq('parking_lot_id', lotId)
+          .eq('is_available', true);
+      
+      return (response as List).length;
+    } catch (e) {
+      print('Error getting available slots: $e');
+      return 0;
+    }
+  }
+
+  Future<int> _getTotalSlots(String lotId) async {
+    try {
+      final response = await _supabase
+          .from('parking_slots')
+          .select()
+          .eq('parking_lot_id', lotId);
+      
+      return (response as List).length;
+    } catch (e) {
+      print('Error getting total slots: $e');
+      return 0;
+    }
   }
 }
 

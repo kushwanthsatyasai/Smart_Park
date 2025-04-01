@@ -20,6 +20,7 @@ import 'screens/booking/booking_screen.dart';
 import 'screens/booking/booking_history_screen.dart';
 import 'utils/app_state.dart';
 import 'screens/payment/payment_screen.dart';
+import 'package:app_links/app_links.dart';
 
 void main() {
   runApp(const LoadingApp());
@@ -36,11 +37,9 @@ Future<void> _initializeApp() async {
     await Supabase.initialize(
       url: dotenv.env['SUPABASE_URL']!,
       anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
-      authFlowType: AuthFlowType.pkce,
     );
 
     print('Supabase initialized successfully');
-    print('URL: ${Supabase.instance.client.supabaseUrl}');
 
     runApp(const MyApp());
   } catch (e) {
@@ -191,6 +190,89 @@ class _SplashScreenState extends State<SplashScreen> {
   void initState() {
     super.initState();
     _checkAuthAndNavigate();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    try {
+      final appLinks = AppLinks();
+      
+      // Handle deep link if app was opened by the link
+      final initialUri = await appLinks.getInitialAppLink();
+      if (initialUri != null) {
+        _handleDeepLink(initialUri);
+      }
+
+      // Listen for deep links while app is running
+      appLinks.uriLinkStream.listen((Uri? uri) {
+        if (uri != null) {
+          _handleDeepLink(uri);
+        }
+      });
+    } catch (e) {
+      print('Deep link initialization error: $e');
+    }
+  }
+
+  void _handleDeepLink(Uri uri) async {
+    try {
+      print('Handling deep link: ${uri.toString()}'); // Debug log
+      if (uri.host == 'login-callback') {
+        // Handle email confirmation
+        final fragment = uri.fragment;
+        print('URL fragment: $fragment'); // Debug log
+
+        if (fragment.isNotEmpty) {
+          // Parse the fragment
+          final params = Uri.parse('?$fragment').queryParameters;
+          print('URL parameters: $params'); // Debug log
+
+          // Check for confirmation type
+          final type = params['type'];
+          if (type == 'signup' || type == 'recovery' || type == 'invite') {
+            // Get tokens
+            final accessToken = params['access_token'];
+            final refreshToken = params['refresh_token'];
+
+            print('Access token: $accessToken'); // Debug log
+            print('Refresh token: $refreshToken'); // Debug log
+
+            if (accessToken != null) {
+              // Set the session
+              await Supabase.instance.client.auth.setSession(accessToken);
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Email confirmed successfully! Please login.'),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 4),
+                  ),
+                );
+                
+                // Sign out and redirect to login
+                await Supabase.instance.client.auth.signOut();
+                Navigator.of(context).pushReplacementNamed('/login');
+              }
+            } else {
+              throw 'No access token found in confirmation link';
+            }
+          }
+        }
+      }
+    } catch (e) {
+      print('Error handling deep link: $e'); // Debug log
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error confirming email: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        Navigator.of(context).pushReplacementNamed('/login');
+      }
+    }
   }
 
   Future<void> _checkAuthAndNavigate() async {

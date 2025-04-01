@@ -1,5 +1,12 @@
 package com.smartparking.app
+
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
-class MainActivity: FlutterActivity()
+import io.flutter.plugins.GeneratedPluginRegistrant
+
+class MainActivity: FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        GeneratedPluginRegistrant.registerWith(flutterEngine)
+    }
+}

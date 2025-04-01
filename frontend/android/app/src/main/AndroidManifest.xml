@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -8,9 +9,11 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <!-- Camera Permission for QR Scanner -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
 
     <application
-        android:label="Smart Parking"
+        android:label="Smart Park"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity android:name="com.google.android.gms.auth.api.signin.internal.SignInHubActivity"
@@ -33,7 +36,9 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <!-- Replace with your scheme -->
-                <data android:scheme="io.supabase.flutterquickstart" android:host="login-callback" />
+                <data 
+                android:scheme="com.smartparking.app" 
+                android:host="login-callback" />
             </intent-filter>     
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
@@ -47,8 +52,15 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.smartparking.app" android:host="login-callback" />
+            </intent-filter>
+            <!-- Deep link configuration -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data 
-                    android:scheme="com.smartparking.app"
+                    android:scheme="smartpark"
                     android:host="login-callback" />
             </intent-filter>
         </activity>
