@@ -2,6 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../config/supabase_config.dart';
 
+// Extension to add capitalize method to String
+extension StringExtension on String {
+  String capitalize() {
+    if (this.isEmpty) return this;
+    return "${this[0].toUpperCase()}${this.substring(1).toLowerCase()}";
+  }
+}
+
 const Color primaryBlue = Color(0xFF1A73E8);
 const Color secondaryBlue = Color(0xFF4285F4);
 const Color lightBlue = Color(0xFFE8F0FE);
@@ -88,7 +96,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'name': _nameController.text.trim(),
           'age': int.tryParse(_ageController.text.trim()),
           'vehicle_type': _selectedVehicleType,
-          'vehicle_number': _vehicleNumberController.text.trim(),
+          'vehicle_number': _vehicleNumberController.text.trim().toUpperCase(),
           'aadhaar_number': _aadhaarController.text.trim(),
           'phone_number': _phoneController.text.trim(),
           'email': _emailController.text.trim(),
@@ -96,6 +104,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'updated_at': DateTime.now().toIso8601String(),
           'role': 'customer'
         });
+
+        // Add vehicle to user_vehicles if vehicle details are provided
+        if (_selectedVehicleType != 'cycle' && _vehicleNumberController.text.trim().isNotEmpty) {
+          try {
+            await _supabase.from('user_vehicles').insert({
+              'user_id': res.user!.id,
+              'vehicle_type': _selectedVehicleType.toLowerCase(),
+              'vehicle_number': _vehicleNumberController.text.trim().toUpperCase(),
+              'nickname': 'My ${_selectedVehicleType.toString().capitalize()}',
+              'created_at': DateTime.now().toIso8601String(),
+            });
+          } catch (e) {
+            print('Error adding vehicle to user_vehicles: $e');
+            // Don't show error to user since profile is already created
+          }
+        }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -134,7 +158,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
       }
     } catch (e) {
-      print('Registration error: $e'); // Add debug log
+      print('Registration error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
