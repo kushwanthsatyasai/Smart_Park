@@ -1,0 +1,5 @@
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^1.10.25
+  mobile_scanner: ^3.5.6 

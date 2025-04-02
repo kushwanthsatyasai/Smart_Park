@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import './admin_analytics_screen.dart';
 import '../auth/login_screen.dart';
+import './qr_scanner_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -101,6 +102,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadDashboardStats,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await _supabase.auth.signOut();
+              if (mounted) {
+                Navigator.of(context).pushReplacementNamed('/login');
+              }
+            },
           ),
         ],
       ),
@@ -231,6 +241,44 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           () => Navigator.pushNamed(
                               context, '/admin/register-parking'),
                         ),
+                        _buildDashboardCard(
+                          title: 'Scan Entry QR',
+                          icon: Icons.qr_code_scanner,
+                          color: Colors.blue,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const QRScannerScreen(isEntry: true),
+                            ),
+                          ),
+                        ),
+                        _buildDashboardCard(
+                          title: 'Scan Exit QR',
+                          icon: Icons.qr_code_2,
+                          color: Colors.green,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const QRScannerScreen(isEntry: false),
+                            ),
+                          ),
+                        ),
+                        _buildDashboardCard(
+                          title: 'View Active Sessions',
+                          icon: Icons.access_time,
+                          color: Colors.orange,
+                          onTap: () {
+                            // TODO: Implement active sessions view
+                          },
+                        ),
+                        _buildDashboardCard(
+                          title: 'Reports',
+                          icon: Icons.analytics,
+                          color: Colors.purple,
+                          onTap: () {
+                            // TODO: Implement reports view
+                          },
+                        ),
                       ],
                     ),
                   ],
@@ -292,6 +340,58 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDashboardCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                color.withOpacity(0.8),
+                color,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 48,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),

@@ -5,6 +5,10 @@
 #include <ESP32QRCodeReader.h>
 #include "esp_camera.h"
 #include "quirc/quirc.h"
+#include <SPI.h>
+#include <SD.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
 
 // Define camera model
 #define CAMERA_MODEL_AI_THINKER
@@ -55,6 +59,10 @@ bool isGateOpen = false;
 unsigned long gateOpenTime = 0;
 const unsigned long GATE_TIMEOUT = 10000; // 10 seconds timeout for gate
 
+// Add after other global variables
+const int SD_CS = 5;  // SD Card CS pin
+WebServer server(80);
+
 // Function declarations
 void connectToWiFi();
 bool processQRCode(camera_fb_t *fb);
@@ -63,6 +71,12 @@ void updateSlotStatusInDatabase();
 void verifyAndOperateGate(String qrData);
 void operateGate(bool open);
 void checkGateTimeout();
+void printImageInfo(camera_fb_t *fb);
+void saveImageToSD(camera_fb_t *fb);
+void handleRoot();
+void handleCapture();
+void displayImagePreview(camera_fb_t *fb);
+void handleDownload();
 
 void setup() {
   Serial.begin(115200);
@@ -218,11 +232,27 @@ void setup() {
 
   // Connect to WiFi
   connectToWiFi();
+
+  // Initialize SD card
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD Card Mount Failed");
+    return;
+  }
+  Serial.println("SD Card Mounted Successfully");
+
+  // Start web server
+  server.on("/", handleRoot);
+  server.on("/capture", handleCapture);
+  server.on("/download", handleDownload);
+  server.begin();
+  Serial.println("HTTP server started");
 }
 
 void loop() {
   static unsigned long lastWiFiCheck = 0;
-  const unsigned long WiFiCheckInterval = 30000; // Check every 30 seconds
+  const unsigned long WiFiCheckInterval = 30000;
+  static unsigned long lastImageCapture = 0;
+  const unsigned long IMAGE_CAPTURE_INTERVAL = 5000; // Capture every 5 seconds
   
   // Check WiFi status periodically
   if (millis() - lastWiFiCheck >= WiFiCheckInterval) {
@@ -240,6 +270,19 @@ void loop() {
   if (millis() - lastUpdateTime >= UPDATE_INTERVAL) {
     updateParkingSlotStatus();
     lastUpdateTime = millis();
+  }
+
+  // Capture and analyze image periodically
+  if (millis() - lastImageCapture >= IMAGE_CAPTURE_INTERVAL) {
+    lastImageCapture = millis();
+    
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (fb) {
+      Serial.println("\n=== New Image Capture ===");
+      printImageInfo(fb);
+      displayImagePreview(fb);
+      esp_camera_fb_return(fb);
+    }
   }
 
   static unsigned long lastCameraError = 0;
@@ -272,6 +315,9 @@ void loop() {
   
   esp_camera_fb_return(fb);
   delay(100);  // Small delay between captures
+
+  // Handle web server requests
+  server.handleClient();
 }
 
 void connectToWiFi() {
@@ -400,5 +446,162 @@ void operateGate(bool open) {
 void checkGateTimeout() {
   if (isGateOpen && (millis() - gateOpenTime >= GATE_TIMEOUT)) {
     operateGate(false);
+  }
+}
+
+void printImageInfo(camera_fb_t *fb) {
+  Serial.println("\n=== Image Capture Details ===");
+  Serial.printf("Size: %d bytes\n", fb->len);
+  Serial.printf("Width: %d, Height: %d\n", fb->width, fb->height);
+  Serial.printf("Format: %d\n", fb->format);
+  
+  // Print first 100 bytes in hex format
+  Serial.println("\nFirst 100 bytes (hex):");
+  size_t bytesToPrint = (fb->len < 100) ? fb->len : 100;
+  for(size_t i = 0; i < bytesToPrint; i++) {
+    Serial.printf("%02X ", fb->buf[i]);
+    if((i + 1) % 16 == 0) Serial.println(); // New line every 16 bytes
+  }
+  Serial.println("\n");
+  
+  // Print image header information
+  Serial.println("JPEG Header Information:");
+  if(fb->buf[0] == 0xFF && fb->buf[1] == 0xD8) {
+    Serial.println("Valid JPEG header found");
+    Serial.printf("Quality: %d\n", fb->buf[2]);
+    Serial.printf("Resolution: %dx%d\n", fb->buf[3] << 8 | fb->buf[4], fb->buf[5] << 8 | fb->buf[6]);
+  } else {
+    Serial.println("Invalid JPEG header");
+  }
+  
+  // Print image statistics
+  int totalBrightness = 0;
+  size_t pixelCount = 0;
+  size_t maxPixels = (fb->len < 1000) ? fb->len : 1000;
+  for(size_t i = 0; i < maxPixels; i++) {
+    totalBrightness += fb->buf[i];
+    pixelCount++;
+  }
+  float avgBrightness = (float)totalBrightness / pixelCount;
+  Serial.printf("Average brightness: %.2f\n", avgBrightness);
+  
+  Serial.println("\n=== End of Image Details ===\n");
+}
+
+void displayImagePreview(camera_fb_t *fb) {
+  Serial.println("\n=== Image Preview (ASCII) ===");
+  // We'll sample every 10th pixel to create a smaller preview
+  const int sampleRate = 10;
+  const int maxWidth = 40;  // Maximum width of ASCII preview
+  const int maxHeight = 20; // Maximum height of ASCII preview
+  
+  // Calculate scaling factors
+  int scaleX = fb->width / maxWidth;
+  int scaleY = fb->height / maxHeight;
+  
+  // ASCII characters for different brightness levels
+  const char* asciiChars = " .:-=+*#%@";
+  const int numChars = strlen(asciiChars) - 1;
+  
+  // Print preview
+  for(int y = 0; y < fb->height; y += scaleY) {
+    for(int x = 0; x < fb->width; x += scaleX) {
+      // Calculate pixel position in buffer
+      int pixelPos = (y * fb->width + x) * 3; // Assuming RGB format
+      if(pixelPos + 2 >= fb->len) break;
+      
+      // Calculate brightness (simple average of RGB)
+      int brightness = (fb->buf[pixelPos] + fb->buf[pixelPos + 1] + fb->buf[pixelPos + 2]) / 3;
+      
+      // Map brightness to ASCII character
+      int charIndex = (brightness * numChars) / 255;
+      Serial.print(asciiChars[charIndex]);
+    }
+    Serial.println();
+  }
+  Serial.println("\n=== End of Preview ===\n");
+}
+
+void saveImageToSD(camera_fb_t *fb) {
+  // Create a unique filename using timestamp
+  char filename[32];
+  sprintf(filename, "/image_%lu.jpg", millis());
+  
+  File file = SD.open(filename, FILE_WRITE);
+  if (!file) {
+    Serial.println("Failed to open file for writing");
+    return;
+  }
+  
+  // Write the image data
+  if (file.write(fb->buf, fb->len)) {
+    Serial.printf("Image saved as %s\n", filename);
+  } else {
+    Serial.println("Failed to write image to file");
+  }
+  
+  file.close();
+}
+
+void handleRoot() {
+  String html = "<html><head>";
+  html += "<style>";
+  html += "body { font-family: Arial, sans-serif; margin: 20px; }";
+  html += "h1 { color: #333; }";
+  html += ".button { display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px; margin: 10px 0; }";
+  html += ".button:hover { background-color: #45a049; }";
+  html += "img { max-width: 640px; margin: 20px 0; }";
+  html += "</style>";
+  html += "</head><body>";
+  
+  html += "<h1>ESP32-CAM Image Viewer</h1>";
+  html += "<p><a href='/capture' class='button'>Capture New Image</a></p>";
+  html += "<p><a href='/download' class='button'>Download Latest Image</a></p>";
+  html += "<p><a href='/stream' class='button'>Start Live Stream</a></p>";
+  html += "<div id='imageContainer'></div>";
+  
+  // Add JavaScript for live streaming
+  html += "<script>";
+  html += "function startStream() {";
+  html += "  const img = document.createElement('img');";
+  html += "  img.src = '/capture?' + new Date().getTime();";
+  html += "  img.onload = function() {";
+  html += "    document.getElementById('imageContainer').innerHTML = '';";
+  html += "    document.getElementById('imageContainer').appendChild(img);";
+  html += "    setTimeout(startStream, 1000);";
+  html += "  };";
+  html += "</script>";
+  
+  html += "</body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleCapture() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (fb) {
+    server.setContentLength(fb->len);
+    server.send(200, "image/jpeg");
+    server.sendContent((char*)fb->buf, fb->len);
+    esp_camera_fb_return(fb);
+  } else {
+    server.send(500, "text/plain", "Camera capture failed");
+  }
+}
+
+void handleDownload() {
+  camera_fb_t *fb = esp_camera_fb_get();
+  if (fb) {
+    // Set headers for file download
+    server.sendHeader("Content-Type", "image/jpeg");
+    server.sendHeader("Content-Disposition", "attachment; filename=capture.jpg");
+    server.sendHeader("Content-Length", String(fb->len));
+    
+    // Send the image data
+    server.setContentLength(fb->len);
+    server.send(200, "image/jpeg");
+    server.sendContent((char*)fb->buf, fb->len);
+    esp_camera_fb_return(fb);
+  } else {
+    server.send(500, "text/plain", "Camera capture failed");
   }
 } 
