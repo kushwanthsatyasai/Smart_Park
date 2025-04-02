@@ -8,6 +8,13 @@ import '../booking/booking_confirmation_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/profile_service.dart';
 import '../profile/profile_completion_screen.dart';
+import '../../widgets/vehicle_selector.dart';
+import 'package:provider/provider.dart';
+import '../../providers/vehicle_provider.dart';
+
+const Color primaryBlue = Color(0xFF1A73E8);
+const Color secondaryBlue = Color(0xFF4285F4);
+const Color lightBlue = Color(0xFFE8F0FE);
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -30,6 +37,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUserData();
     _loadActiveBooking();
     _checkProfileCompletion();
+    // Load default vehicle
+    Provider.of<VehicleProvider>(context, listen: false).loadDefaultVehicle();
   }
 
   Future<void> _loadUserData() async {
@@ -223,6 +232,127 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    final vehicleProvider = Provider.of<VehicleProvider>(context);
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Smart Parking'),
+        backgroundColor: primaryBlue,
+        foregroundColor: Colors.white,
+        actions: [
+          if (!isLoading) VehicleSelector(
+            onVehicleSelected: (vehicle) {
+              final vehicleProvider = Provider.of<VehicleProvider>(context, listen: false);
+              vehicleProvider.setSelectedVehicle(vehicle);
+            },
+            initialVehicle: vehicleProvider.selectedVehicle,
+            isCompact: true,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _signOut,
+          ),
+        ],
+      ),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: () async {
+                await _loadActiveBooking();
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        'Welcome, $userName!',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                    ),
+                    _buildActiveBookingCard(),
+                    const SizedBox(height: 24),
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 16,
+                      crossAxisSpacing: 16,
+                      children: [
+                        _buildFeatureCard(
+                          context,
+                          'Find Parking',
+                          Icons.location_on,
+                          _navigateToMap,
+                          Colors.blue,
+                        ),
+                        _buildFeatureCard(
+                          context,
+                          'Scan QR',
+                          Icons.qr_code_scanner,
+                          _navigateToScanner,
+                          Colors.green,
+                        ),
+                        _buildFeatureCard(
+                          context,
+                          'Booking History',
+                          Icons.history,
+                          _navigateToBookingHistory,
+                          Colors.orange,
+                        ),
+                        _buildFeatureCard(
+                          context,
+                          'Profile',
+                          Icons.person,
+                          _navigateToProfile,
+                          Colors.purple,
+                        ),
+                      ],
+                    ),
+                    if (isAdmin) ...[
+                      const SizedBox(height: 24),
+                      Text(
+                        'Admin Features',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 16),
+                      GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 16,
+                        crossAxisSpacing: 16,
+                        children: [
+                          _buildFeatureCard(
+                            context,
+                            'Dashboard',
+                            Icons.dashboard,
+                            () =>
+                                Navigator.pushNamed(context, '/admin/dashboard'),
+                            Colors.red,
+                          ),
+                          _buildFeatureCard(
+                            context,
+                            'Register Parking',
+                            Icons.local_parking,
+                            () => Navigator.pushNamed(
+                                context, '/admin/register-parking'),
+                            Colors.teal,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
   Widget _buildActiveBookingCard() {
     if (_activeBooking == null) {
       return const SizedBox.shrink();
@@ -320,114 +450,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Smart Parking'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _signOut,
-          ),
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: () async {
-                await _loadActiveBooking();
-              },
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Welcome, $userName!',
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                    const SizedBox(height: 24),
-                    _buildActiveBookingCard(),
-                    const SizedBox(height: 24),
-                    GridView.count(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 16,
-                      crossAxisSpacing: 16,
-                      children: [
-                        _buildFeatureCard(
-                          context,
-                          'Find Parking',
-                          Icons.location_on,
-                          _navigateToMap,
-                          Colors.blue,
-                        ),
-                        _buildFeatureCard(
-                          context,
-                          'Scan QR',
-                          Icons.qr_code_scanner,
-                          _navigateToScanner,
-                          Colors.green,
-                        ),
-                        _buildFeatureCard(
-                          context,
-                          'Booking History',
-                          Icons.history,
-                          _navigateToBookingHistory,
-                          Colors.orange,
-                        ),
-                        _buildFeatureCard(
-                          context,
-                          'Profile',
-                          Icons.person,
-                          _navigateToProfile,
-                          Colors.purple,
-                        ),
-                      ],
-                    ),
-                    if (isAdmin) ...[
-                      const SizedBox(height: 24),
-                      Text(
-                        'Admin Features',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 16),
-                      GridView.count(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 16,
-                        crossAxisSpacing: 16,
-                        children: [
-                          _buildFeatureCard(
-                            context,
-                            'Dashboard',
-                            Icons.dashboard,
-                            () =>
-                                Navigator.pushNamed(context, '/admin/dashboard'),
-                            Colors.red,
-                          ),
-                          _buildFeatureCard(
-                            context,
-                            'Register Parking',
-                            Icons.local_parking,
-                            () => Navigator.pushNamed(
-                                context, '/admin/register-parking'),
-                            Colors.teal,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
     );
   }
 

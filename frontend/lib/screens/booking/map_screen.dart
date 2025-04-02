@@ -6,6 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import './booking_screen.dart';
 import '../qr_display_screen.dart';
+import '../../widgets/vehicle_selector.dart';
+import 'package:provider/provider.dart';
+import '../../providers/vehicle_provider.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -46,6 +49,8 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _initializeMap();
+    // Load default vehicle if not already loaded
+    Provider.of<VehicleProvider>(context, listen: false).loadDefaultVehicle();
   }
 
   Future<void> _initializeMap() async {
@@ -452,10 +457,21 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final vehicleProvider = Provider.of<VehicleProvider>(context);
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Find Parking'),
         actions: [
+          VehicleSelector(
+            onVehicleSelected: (vehicle) {
+              vehicleProvider.setSelectedVehicle(vehicle);
+              // Optionally refresh parking lots based on vehicle type
+              _loadNearbyParkingLots();
+            },
+            initialVehicle: vehicleProvider.selectedVehicle,
+            isCompact: true,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _initializeMap,
