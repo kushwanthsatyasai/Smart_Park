@@ -1,7 +1,5 @@
-plugins {
-    id 'com.android.library'
-    id 'kotlin-android'
-}
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
 
 def localProperties = new Properties()
 def localPropertiesFile = rootProject.file('local.properties')
@@ -17,7 +15,7 @@ if (flutterRoot == null) {
 }
 
 android {
-    namespace "com.llfbandit.app_links"
+    namespace "io.flutter.plugins.app_links"
     compileSdkVersion 33
 
     compileOptions {
@@ -37,4 +35,5 @@ android {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+    implementation 'androidx.annotation:annotation:1.5.0'
 } 

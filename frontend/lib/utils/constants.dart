@@ -1,7 +1,12 @@
 class AppConstants {
   // API URLs
-  static const String supabaseUrl = 'YOUR_SUPABASE_URL';
-  static const String supabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY';
+  static const String supabaseUrl = 'https://ubqrfmyvutvstgxeubvr.supabase.co';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVicXJmbXl2dXR2c3RneGV1YnZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkyNzc1MDgsImV4cCI6MjA1NDg1MzUwOH0.3wU-ZJFNSJZIoL2DdrlJjbmb1799ElBtt_IXNwXf-ek';
+
+  // Server URLs
+  static const String defaultQrServerUrl = 'http://192.168.137.1:8000';
+  static const String localQrServerUrl = 'http://localhost:8000';
+  static const String fallbackQrServerUrl = 'http://127.0.0.1:8000';
 
   // App Settings
   static const String appName = 'Smart Parking';
@@ -10,11 +15,14 @@ class AppConstants {
   // Storage Keys
   static const String authTokenKey = 'auth_token';
   static const String userIdKey = 'user_id';
+  static const String serverUrlKey = 'server_url';
+  static const String lastSuccessfulServerUrlKey = 'last_successful_server_url';
 
   // Error Messages
   static const String genericError = 'Something went wrong. Please try again.';
   static const String networkError = 'Please check your internet connection.';
   static const String authError = 'Authentication failed. Please try again.';
+  static const String serverError = 'Server connection failed. Check server settings.';
 
   // Success Messages
   static const String loginSuccess = 'Successfully logged in!';

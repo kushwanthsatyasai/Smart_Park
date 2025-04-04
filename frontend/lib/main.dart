@@ -12,6 +12,7 @@ import 'screens/scanner_screen.dart';
 import 'screens/booking/qr_scanner_screen.dart';
 import 'screens/profile/complete_profile_screen.dart';
 import 'screens/admin/admin_dashboard.dart';
+import 'screens/admin/generate_qr_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'utils/map_utils.dart';
 import 'screens/admin/parking_lot_registration.dart';
@@ -21,8 +22,10 @@ import 'screens/booking/booking_history_screen.dart';
 import 'utils/app_state.dart';
 import 'screens/payment/payment_screen.dart';
 import 'package:app_links/app_links.dart';
+import 'package:provider/provider.dart';
+import 'providers/vehicle_provider.dart';
 
-void main() {
+void main() async {
   runApp(const LoadingApp());
   _initializeApp();
 }
@@ -41,7 +44,15 @@ Future<void> _initializeApp() async {
 
     print('Supabase initialized successfully');
 
-    runApp(const MyApp());
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => VehicleProvider()),
+          // ... other providers if any ...
+        ],
+        child: const MyApp(),
+      ),
+    );
   } catch (e) {
     print('Initialization error: $e');
     runApp(ErrorApp(error: e.toString()));
@@ -86,7 +97,8 @@ class MyApp extends StatelessWidget {
         '/booking-history': (context) => const BookingHistoryScreen(),
         '/admin/dashboard': (context) => const AdminDashboard(),
         '/admin/register-parking': (context) => const ParkingLotRegistration(),
-        '/admin/generate-qr': (context) => const ParkingQRGenerator(),
+        '/admin/generate-qr': (context) => const GenerateQRScreen(),
+        '/admin/parking-qr-generator': (context) => const ParkingQRGenerator(),
         '/qr-verification': (context) => const QRScannerScreen(),
       },
       onGenerateRoute: (settings) {
