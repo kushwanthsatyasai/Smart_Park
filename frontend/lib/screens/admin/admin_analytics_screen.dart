@@ -104,59 +104,80 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen> {
     setState(() => _isLoading = true);
     try {
       final supabase = Supabase.instance.client;
+      DateTime now = DateTime.now();
+      DateTime start;
+      DateTime end;
 
-      // Get total bookings count using the correct relationship
-      final bookingsResponse = await supabase
-          .from('parking_bookings')
-          .select('''
-            *,
-            parking_lots!parking_bookings_parking_id_fkey (*)
-          ''');
-
-      final bookingsCount = bookingsResponse.length;
-
-      // Get today's bookings
-      final today = DateTime.now().toLocal();
-      final startOfDay = DateTime(today.year, today.month, today.day).toIso8601String();
-      final endOfDay = DateTime(today.year, today.month, today.day, 23, 59, 59).toIso8601String();
-      
-      final todayBookings = bookingsResponse.where((booking) {
-        final bookingTime = DateTime.parse(booking['created_at']);
-        return bookingTime.isAfter(DateTime.parse(startOfDay)) && 
-               bookingTime.isBefore(DateTime.parse(endOfDay));
-      }).length;
-
-      // Calculate revenue
-      double totalRevenue = 0;
-      for (var booking in bookingsResponse) {
-        if (booking['total_fee'] != null) {
-          totalRevenue += (booking['total_fee'] as num).toDouble();
-        }
+      if (_selectedTimeFilter == 'today') {
+        start = DateTime(now.year, now.month, now.day);
+        end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      } else if (_selectedTimeFilter == 'yesterday') {
+        final yesterday = now.subtract(const Duration(days: 1));
+        start = DateTime(yesterday.year, yesterday.month, yesterday.day);
+        end = DateTime(yesterday.year, yesterday.month, yesterday.day, 23, 59, 59);
+      } else if (_selectedTimeFilter == 'week') {
+        final weekAgo = now.subtract(const Duration(days: 6));
+        start = DateTime(weekAgo.year, weekAgo.month, weekAgo.day);
+        end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      } else if (_selectedTimeFilter == 'month') {
+        start = DateTime(now.year, now.month, 1);
+        end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      } else if (_selectedTimeFilter == 'year') {
+        start = DateTime(now.year, 1, 1);
+        end = DateTime(now.year, 12, 31, 23, 59, 59);
+      } else if (_selectedTimeFilter == 'custom') {
+        start = DateTime(_startDate.year, _startDate.month, _startDate.day);
+        end = DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59, 59);
+      } else {
+        // Default to today
+        start = DateTime(now.year, now.month, now.day);
+        end = DateTime(now.year, now.month, now.day, 23, 59, 59);
       }
 
-      // Get active bookings
-      final activeBookings = bookingsResponse.where((booking) => 
+      final startStr = start.toIso8601String();
+      final endStr = end.toIso8601String();
+
+      // Fetch bookings in the selected range
+      final bookingsResponse = await supabase
+          .from('parking_bookings')
+          .select('*, parking_lots!parking_bookings_parking_id_fkey (*)')
+          .gte('created_at', startStr)
+          .lte('created_at', endStr);
+
+      final filteredBookingsCount = bookingsResponse.length;
+      double filteredRevenue = 0;
+      for (var booking in bookingsResponse) {
+        if (booking['total_fee'] != null) {
+          filteredRevenue += (booking['total_fee'] as num).toDouble();
+        }
+      }
+      final filteredActiveBookings = bookingsResponse.where((booking) =>
         ['pending', 'active'].contains(booking['status'])).length;
+
+      // Fetch all-time (lifetime) revenue and bookings
+      final allBookings = await supabase
+          .from('parking_bookings')
+          .select('total_fee');
+      double lifetimeRevenue = 0;
+      for (var booking in allBookings) {
+        if (booking['total_fee'] != null) {
+          lifetimeRevenue += (booking['total_fee'] as num).toDouble();
+        }
+      }
+      final allTimeBookingsCount = allBookings.length;
 
       if (mounted) {
         setState(() {
           _analytics = {
-            'total_bookings': bookingsCount,
-            'today_bookings': todayBookings,
-            'total_revenue': totalRevenue,
-            'active_bookings': activeBookings,
+            'lifetime_earnings': lifetimeRevenue,
+            'all_time_bookings': allTimeBookingsCount,
+            'filtered_revenue': filteredRevenue,
+            'filtered_bookings': filteredBookingsCount,
+            'filtered_active_bookings': filteredActiveBookings,
           };
           _isLoading = false;
         });
       }
-
-      // Debug prints
-      print('Analytics loaded successfully:');
-      print('Total bookings: $bookingsCount');
-      print('Today\'s bookings: $todayBookings');
-      print('Total revenue: $totalRevenue');
-      print('Active bookings: $activeBookings');
-
     } catch (e) {
       print('Error loading analytics: $e');
       if (mounted) {
@@ -300,6 +321,83 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen> {
       }
     } finally {
       if (mounted) setState(() => _isSearching = false);
+    }
+  }
+
+  Future<void> _calculateCustomDateRange() async {
+    if (_endDate.isBefore(_startDate)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('End date cannot be before start date'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final supabase = Supabase.instance.client;
+
+      // Format dates for queries
+      final startDateStr = DateTime(_startDate.year, _startDate.month, _startDate.day).toIso8601String();
+      final endDateStr = DateTime(_endDate.year, _endDate.month, _endDate.day, 23, 59, 59).toIso8601String();
+      
+      // Get bookings in the date range
+      final bookingsResponse = await supabase
+          .from('parking_bookings')
+          .select('''
+            *,
+            parking_lots!parking_bookings_parking_id_fkey (*)
+          ''')
+          .gte('created_at', startDateStr)
+          .lte('created_at', endDateStr);
+
+      final bookingsCount = bookingsResponse.length;
+
+      // Calculate revenue for the date range
+      double totalRevenue = 0;
+      for (var booking in bookingsResponse) {
+        if (booking['total_fee'] != null) {
+          totalRevenue += (booking['total_fee'] as num).toDouble();
+        }
+      }
+
+      // Get active bookings in the date range
+      final activeBookings = bookingsResponse.where((booking) => 
+        ['pending', 'active'].contains(booking['status'])).length;
+
+      if (mounted) {
+        setState(() {
+          _analytics = {
+            ..._analytics,
+            'custom_range_bookings': bookingsCount,
+            'custom_range_revenue': totalRevenue,
+            'custom_active_bookings': activeBookings,
+          };
+          _isLoading = false;
+        });
+      }
+
+      // Update UI to show custom range data
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Calculated data for selected date range'),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+    } catch (e) {
+      print('Error calculating custom range analytics: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error calculating custom range: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -464,6 +562,7 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen> {
                 _buildFilterChip('Yesterday', 'yesterday'),
                 _buildFilterChip('Week', 'week'),
                 _buildFilterChip('Month', 'month'),
+                _buildFilterChip('Year', 'year'),
                 _buildFilterChip('Custom', 'custom'),
               ],
             ),
@@ -508,6 +607,18 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _calculateCustomDateRange,
+                  icon: const Icon(Icons.calculate),
+                  label: const Text('Calculate Custom Range'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
             ],
           ],
         ),
@@ -547,16 +658,63 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildAnalyticsCard(
-                  'Total Revenue',
-                  '₹${_analytics['total_revenue']?.toStringAsFixed(2) ?? '0.00'}',
+                  'Lifetime Earnings',
+                  '₹${_analytics['lifetime_earnings']?.toStringAsFixed(2) ?? '0.00'}',
                   Icons.currency_rupee,
                   Colors.green,
                 ),
                 _buildAnalyticsCard(
-                  'Total Bookings',
-                  '${_analytics['total_bookings'] ?? 0}',
+                  'All-Time Bookings',
+                  '${_analytics['all_time_bookings'] ?? 0}',
                   Icons.book_online,
                   Colors.blue,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilteredAnalytics() {
+    String label = '';
+    if (_selectedTimeFilter == 'today') label = 'Today';
+    else if (_selectedTimeFilter == 'yesterday') label = 'Yesterday';
+    else if (_selectedTimeFilter == 'week') label = 'This Week';
+    else if (_selectedTimeFilter == 'month') label = 'This Month';
+    else if (_selectedTimeFilter == 'year') label = 'This Year';
+    else if (_selectedTimeFilter == 'custom') label = 'Custom Range';
+    else label = 'Selected';
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$label Analytics',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildAnalyticsCard(
+                  'Revenue',
+                  '₹${_analytics['filtered_revenue']?.toStringAsFixed(2) ?? '0.00'}',
+                  Icons.bar_chart,
+                  Colors.purple,
+                ),
+                _buildAnalyticsCard(
+                  'Bookings',
+                  '${_analytics['filtered_bookings'] ?? 0}',
+                  Icons.calendar_month,
+                  Colors.orange,
                 ),
               ],
             ),
@@ -703,6 +861,8 @@ class _AdminAnalyticsScreenState extends State<AdminAnalyticsScreen> {
                     _buildTimeFilter(),
                     const SizedBox(height: 16),
                     _buildAnalyticsSummary(),
+                    const SizedBox(height: 16),
+                    _buildFilteredAnalytics(),
                     const SizedBox(height: 16),
                     _buildSlotStatus(),
                   ],

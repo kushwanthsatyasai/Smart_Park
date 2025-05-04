@@ -17,6 +17,12 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+
+    plugins {
+        id 'com.android.application' version '8.1.0'
+        id 'com.android.library' version '8.1.0'
+        id 'org.jetbrains.kotlin.android' version '1.9.22'
+    }
 }
 
 include ':app'
@@ -45,3 +51,5 @@ def flutterSdkPath = properties.getProperty("flutter.sdk")
 assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
 
 apply from: "$flutterSdkPath/packages/flutter_tools/gradle/app_plugin_loader.gradle"
+
+// Removed qr_code_scanner configuration as we're no longer using this package

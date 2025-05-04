@@ -113,26 +113,32 @@ class _RegisterScreenState extends State<RegisterScreen> {
               'vehicle_type': _selectedVehicleType.toLowerCase(),
               'vehicle_number': _vehicleNumberController.text.trim().toUpperCase(),
               'nickname': 'My ${_selectedVehicleType.toString().capitalize()}',
+              'is_primary': true, // Mark as primary vehicle
               'created_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
             });
           } catch (e) {
             print('Error adding vehicle to user_vehicles: $e');
-            // Don't show error to user since profile is already created
+            // Show error to user since this is important
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Error adding vehicle: $e'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
           }
         }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Registration successful! Please check your email for the confirmation link. '
-                'Click the link to verify your account. The link will open in your Smart Park app.',
-              ),
+              content: Text('Registration successful!'),
               backgroundColor: Colors.green,
-              duration: Duration(seconds: 8),
             ),
           );
-          Navigator.of(context).pushReplacementNamed('/login');
+          Navigator.pushReplacementNamed(context, '/login');
         }
       }
     } on AuthException catch (e) {

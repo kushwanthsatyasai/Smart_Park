@@ -4,6 +4,9 @@ import './register_screen.dart';
 import 'dart:convert';
 import 'dart:async';
 import '../home/home_screen.dart';
+import '../admin/admin_dashboard.dart';
+import '../../admin_services.dart';
+import '../../config/supabase_config.dart';
 
 class LoginScreen extends StatefulWidget {
   final Map<String, dynamic>? redirectData;
@@ -281,93 +284,53 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signIn() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
     try {
-      setState(() {
-        _isLoading = true;
-      });
-
-      // Validate input
-      final email = _emailController.text.trim();
-      final password = _passwordController.text.trim();
-
-      if (email.isEmpty || password.isEmpty) {
-        throw 'Please fill in all fields';
+      // Check Supabase connection first
+      if (!SupabaseConfig.isValid()) {
+        throw 'Supabase configuration is invalid';
       }
 
-      if (!email.contains('@')) {
-        throw 'Please enter a valid email address';
-      }
-
-      if (password.length < 6) {
-        throw 'Password must be at least 6 characters';
-      }
-
-      final supabase = Supabase.instance.client;
-
-      // Attempt to sign in
-      final AuthResponse res = await supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
+      final response = await Supabase.instance.client.auth.signInWithPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
       );
 
-      if (res.user == null) {
-        throw 'Authentication failed';
-      }
-
-      // Get user profile to check role
-      final profileResponse = await supabase
-          .from('profiles')
-          .select('role, name')
-          .eq('id', res.user!.id)
-          .single();
-
-      final userRole = profileResponse['role'] as String?;
-      final userName = profileResponse['name'] as String?;
-
-      if (mounted) {
-        // Clear any existing error messages
-        ScaffoldMessenger.of(context).clearSnackBars();
-
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Welcome back, ${userName ?? 'User'}!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-
-        // Navigate based on role
-        if (userRole == 'admin') {
-          Navigator.of(context).pushReplacementNamed('/admin/dashboard');
-        } else {
-          Navigator.of(context).pushReplacementNamed('/home');
+      if (response.user != null) {
+        final isAdmin = await AdminServices().checkAdminAccess();
+        
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => isAdmin ? const AdminDashboard() : const HomeScreen(),
+            ),
+          );
         }
       }
     } on AuthException catch (e) {
-      print('AuthException: ${e.message}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.message),
+            content: Text('Authentication error: ${e.message}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } catch (e) {
-      print('Error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: ${e.toString()}'),
+            content: Text('Error during sign in: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     }
   }

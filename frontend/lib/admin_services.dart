@@ -47,7 +47,8 @@ class AdminServices {
           .single()
       );
       
-      return response['role'] == 'admin';
+      final role = response['role'] as String? ?? 'customer';
+      return role.toLowerCase() == 'admin';
     } catch (e) {
       print('Error checking admin status: $e');
       return false;

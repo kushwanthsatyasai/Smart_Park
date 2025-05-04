@@ -25,13 +25,28 @@ class ProfileService {
     final profile = await getUserProfile();
     if (profile == null) return false;
 
-    // Add all required fields here
-    final requiredFields = [
-      'name',
-      'phone_number',
-      'vehicle_number',
-      'email',
-    ];
+    // Check user role
+    final userRole = profile['role'] as String? ?? 'customer';
+    
+    // Different required fields based on user role
+    List<String> requiredFields;
+    
+    if (userRole == 'parking_owner' || userRole == 'admin') {
+      // Parking owners and admins don't need vehicle info
+      requiredFields = [
+        'name',
+        'phone_number',
+        'email',
+      ];
+    } else {
+      // Regular customers need all fields
+      requiredFields = [
+        'name',
+        'phone_number',
+        'vehicle_number',
+        'email',
+      ];
+    }
 
     return requiredFields.every((field) => 
       profile[field] != null && profile[field].toString().isNotEmpty

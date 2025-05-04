@@ -24,31 +24,32 @@ import 'screens/payment/payment_screen.dart';
 import 'package:app_links/app_links.dart';
 import 'package:provider/provider.dart';
 import 'providers/vehicle_provider.dart';
+import 'services/slot_management_service.dart';
+import 'theme/app_theme.dart';
+import 'providers/theme_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'admin_services.dart';
+import 'config/supabase_config.dart';
+import 'screens/parking_owner/parking_owner_dashboard.dart';
+
+// Global instance for easy access
+SlotManagementService? slotManagementService;
 
 void main() async {
-  runApp(const LoadingApp());
-  _initializeApp();
-}
-
-Future<void> _initializeApp() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
 
     // Load environment variables
     await dotenv.load(fileName: ".env");
 
-    await Supabase.initialize(
-      url: dotenv.env['SUPABASE_URL']!,
-      anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
-    );
-
-    print('Supabase initialized successfully');
+    // Initialize Supabase with proper configuration
+    await SupabaseConfig.initialize();
 
     runApp(
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => VehicleProvider()),
-          // ... other providers if any ...
+          ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ],
         child: const MyApp(),
       ),
@@ -56,6 +57,99 @@ Future<void> _initializeApp() async {
   } catch (e) {
     print('Initialization error: $e');
     runApp(ErrorApp(error: e.toString()));
+  }
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ThemeProvider>(
+      builder: (context, themeProvider, child) {
+        return MaterialApp(
+          title: 'Smart Park',
+          theme: themeProvider.isDarkMode ? AppTheme.darkTheme : AppTheme.lightTheme,
+          debugShowCheckedModeBanner: false,
+          home: const AuthWrapper(),
+        );
+      },
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  Future<Map<String, dynamic>> _getUserRole(String userId) async {
+    try {
+      final response = await Supabase.instance.client
+          .from('profiles')
+          .select('role')
+          .eq('id', userId)
+          .single();
+      
+      final isAdmin = await AdminServices().checkAdminAccess();
+      final role = response['role'] as String? ?? 'customer';
+      
+      return {
+        'isAdmin': isAdmin,
+        'role': role,
+      };
+    } catch (e) {
+      print('Error checking user role: $e');
+      return {
+        'isAdmin': false,
+        'role': 'customer',
+      };
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          final session = snapshot.data!.session;
+          if (session != null) {
+            return FutureBuilder<Map<String, dynamic>>(
+              future: _getUserRole(session.user.id),
+              builder: (context, roleSnapshot) {
+                if (roleSnapshot.connectionState == ConnectionState.waiting) {
+                  return const Scaffold(
+                    body: Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                if (roleSnapshot.hasError) {
+                  return Scaffold(
+                    body: Center(
+                      child: Text('Error: ${roleSnapshot.error}'),
+                    ),
+                  );
+                }
+
+                final userData = roleSnapshot.data!;
+                final isAdmin = userData['isAdmin'] ?? false;
+                final role = userData['role'] ?? 'customer';
+                
+                if (isAdmin) {
+                  return const AdminDashboard();
+                } else if (role == 'parking_owner') {
+                  return const ParkingOwnerDashboard();
+                } else {
+                  return const HomeScreen();
+                }
+              },
+            );
+          }
+        }
+        return const LoginScreen();
+      },
+    );
   }
 }
 
@@ -70,87 +164,6 @@ class LoadingApp extends StatelessWidget {
           child: CircularProgressIndicator(),
         ),
       ),
-    );
-  }
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Smart Parking App',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-        useMaterial3: true,
-      ),
-      initialRoute: '/login',
-      routes: {
-        '/': (context) => const LoginScreen(),
-        '/login': (context) => const LoginScreen(),
-        '/register': (context) => const RegisterScreen(),
-        '/home': (context) => const HomeScreen(),
-        '/map': (context) => const MapScreen(),
-        '/scanner': (context) => const ScannerScreen(),
-        '/booking-history': (context) => const BookingHistoryScreen(),
-        '/admin/dashboard': (context) => const AdminDashboard(),
-        '/admin/register-parking': (context) => const ParkingLotRegistration(),
-        '/admin/generate-qr': (context) => const GenerateQRScreen(),
-        '/admin/parking-qr-generator': (context) => const ParkingQRGenerator(),
-        '/qr-verification': (context) => const QRScannerScreen(),
-      },
-      onGenerateRoute: (settings) {
-        if (settings.name == '/booking') {
-          final args = settings.arguments as Map<String, dynamic>?;
-          if (args == null) {
-            return MaterialPageRoute(
-              builder: (context) => const HomeScreen(),
-            );
-          }
-          return MaterialPageRoute(
-            builder: (context) => BookingScreen(
-              parkingData: args['parking_lot'],
-            ),
-          );
-        }
-        
-        if (settings.name == '/booking-confirmation') {
-          final args = settings.arguments as Map<String, dynamic>?;
-          if (args == null) {
-            return MaterialPageRoute(
-              builder: (context) => const HomeScreen(),
-            );
-          }
-          return MaterialPageRoute(
-            builder: (context) => BookingConfirmationScreen(
-              bookingDetails: args['bookingDetails'],
-              parkingLot: args['parkingLot'],
-              assignedSlot: args['assignedSlot'],
-            ),
-          );
-        }
-
-        if (settings.name == '/payment') {
-          final args = settings.arguments as Map<String, dynamic>?;
-          if (args == null) {
-            return MaterialPageRoute(
-              builder: (context) => const HomeScreen(),
-            );
-          }
-          return MaterialPageRoute(
-            builder: (context) => PaymentScreen(
-              bookingId: args['bookingId'] as String,
-              amount: args['amount'] as double,
-            ),
-          );
-        }
-
-        return MaterialPageRoute(
-          builder: (context) => const HomeScreen(),
-        );
-      },
     );
   }
 }
@@ -210,11 +223,11 @@ class _SplashScreenState extends State<SplashScreen> {
       final appLinks = AppLinks();
       
       // Handle deep link if app was opened by the link
-      final initialUri = await appLinks.getInitialAppLink();
+      final initialUri = await appLinks.getInitialLink();
       if (initialUri != null) {
         _handleDeepLink(initialUri);
       }
-
+  
       // Listen for deep links while app is running
       appLinks.uriLinkStream.listen((Uri? uri) {
         if (uri != null) {
@@ -311,6 +324,29 @@ class _SplashScreenState extends State<SplashScreen> {
       body: Center(
         child: CircularProgressIndicator(),
       ),
+    );
+  }
+}
+
+// Add this widget to your AppBar actions in every screen
+class ThemeToggle extends StatelessWidget {
+  const ThemeToggle({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<ThemeProvider>(
+      builder: (context, themeProvider, child) {
+        return IconButton(
+          icon: Icon(
+            themeProvider.isDarkMode ? Icons.light_mode : Icons.dark_mode,
+            color: themeProvider.isDarkMode ? Colors.white : Colors.black,
+          ),
+          onPressed: () {
+            themeProvider.toggleTheme();
+          },
+          tooltip: themeProvider.isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+        );
+      },
     );
   }
 }

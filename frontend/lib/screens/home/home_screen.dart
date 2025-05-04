@@ -11,6 +11,7 @@ import '../profile/profile_completion_screen.dart';
 import '../../widgets/vehicle_selector.dart';
 import 'package:provider/provider.dart';
 import '../../providers/vehicle_provider.dart';
+import '../../main.dart';
 
 const Color primaryBlue = Color(0xFF1A73E8);
 const Color secondaryBlue = Color(0xFF4285F4);
@@ -254,6 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.logout),
             onPressed: _signOut,
           ),
+          ThemeToggle(),
         ],
       ),
       body: isLoading

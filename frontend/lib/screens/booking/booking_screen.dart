@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../widgets/custom_button.dart';
+import '../../widgets/parking_space_grid.dart';
+import '../../theme/app_theme.dart';
 import 'booking_confirmation_screen.dart';
 import 'dart:math';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +10,7 @@ import '../profile/vehicle_management_screen.dart';
 import '../../widgets/vehicle_selector.dart';
 import 'package:provider/provider.dart';
 import '../../providers/vehicle_provider.dart';
+import '../../services/booking_monitor_service.dart';
 
 // Extension to add capitalize method to String
 extension StringExtension on String {
@@ -35,14 +38,49 @@ class BookingScreen extends StatefulWidget {
 
 class _BookingScreenState extends State<BookingScreen> {
   final _supabase = Supabase.instance.client;
+  final _bookingMonitor = BookingMonitorService();
   bool _isLoading = false;
   Map<String, dynamic>? _assignedSlot;
   TimeOfDay? _selectedTime;
   int _selectedDuration = 1;
+  int _selectedFloor = 0;
+  List<Map<String, dynamic>> _parkingSlots = [];
+  DateTime? _bookingStartTime;
 
   @override
   void initState() {
     super.initState();
+    _loadParkingSlots();
+    _bookingMonitor.startMonitoring();
+  }
+
+  @override
+  void dispose() {
+    _bookingMonitor.stopMonitoring();
+    super.dispose();
+  }
+
+  Future<void> _loadParkingSlots() async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await _supabase
+          .from('parking_slots')
+          .select()
+          .eq('parking_lot_id', widget.parkingData['id']);
+      setState(() {
+        _parkingSlots = List<Map<String, dynamic>>.from(response);
+      });
+    } catch (e) {
+      print('Error loading slots: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _selectSlot(Map<String, dynamic> slot) {
+    setState(() {
+      _assignedSlot = slot;
+    });
   }
 
   Future<void> _selectTime() async {
@@ -51,20 +89,7 @@ class _BookingScreenState extends State<BookingScreen> {
       initialTime: TimeOfDay.now(),
       builder: (BuildContext context, Widget? child) {
         return Theme(
-          data: Theme.of(context).copyWith(
-            timePickerTheme: TimePickerThemeData(
-              backgroundColor: Colors.white,
-              hourMinuteTextColor: Colors.blue,
-              dayPeriodTextColor: Colors.blue,
-              dialHandColor: Colors.blue,
-              dialBackgroundColor: Colors.grey.shade200,
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.blue,
-              ),
-            ),
-          ),
+          data: AppTheme.darkTheme,
           child: child!,
         );
       },
@@ -73,81 +98,15 @@ class _BookingScreenState extends State<BookingScreen> {
     if (picked != null) {
       setState(() {
         _selectedTime = picked;
-        // Calculate duration based on current time and selected time
         final now = TimeOfDay.now();
         int selectedMinutes = picked.hour * 60 + picked.minute;
         int currentMinutes = now.hour * 60 + now.minute;
         int durationMinutes = selectedMinutes - currentMinutes;
         if (durationMinutes <= 0) {
-          // If selected time is earlier than current time, assume it's for next day
           durationMinutes += 24 * 60;
         }
         _selectedDuration = (durationMinutes / 60).ceil();
       });
-    }
-  }
-
-  Future<void> _getAvailableSlot() async {
-    final selectedVehicle = Provider.of<VehicleProvider>(context, listen: false).selectedVehicle;
-    
-    if (selectedVehicle == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select a vehicle first'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-    try {
-      final response = await _supabase
-          .from('parking_slots')
-          .select('''
-            id,
-            slot_number,
-            vehicle_type,
-            is_available,
-            rate_per_hour,
-            parking_lot_id
-          ''')
-          .eq('parking_lot_id', widget.parkingData['id'])
-          .eq('vehicle_type', selectedVehicle.type.toLowerCase())
-          .eq('is_available', true);
-
-      final slots = List<Map<String, dynamic>>.from(response);
-      
-      if (slots.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No available slots found for this vehicle type'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
-      }
-
-      final random = Random();
-      final selectedSlot = slots[random.nextInt(slots.length)];
-
-      setState(() {
-        _assignedSlot = selectedSlot;
-      });
-    } catch (e) {
-      print('Error getting available slot: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -171,6 +130,7 @@ class _BookingScreenState extends State<BookingScreen> {
       final verificationCode = (100000 + Random().nextInt(900000)).toString();
       
       final now = DateTime.now();
+      _bookingStartTime = now;
       final totalFee = _assignedSlot!['rate_per_hour'] * _selectedDuration.toDouble();
 
       final bookingResponse = await _supabase
@@ -192,7 +152,6 @@ class _BookingScreenState extends State<BookingScreen> {
             'is_verified': false,
             'created_at': now.toIso8601String(),
             'updated_at': now.toIso8601String(),
-            'vehicle_id': selectedVehicle.id,
           })
           .select()
           .single();
@@ -217,6 +176,14 @@ class _BookingScreenState extends State<BookingScreen> {
       };
 
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter the parking lot within 10 minutes, or your booking will expire.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 6),
+          ),
+        );
+
         Navigator.pop(context, {
           'success': true,
           'booking_details': bookingDetails,
@@ -260,11 +227,11 @@ class _BookingScreenState extends State<BookingScreen> {
     final vehicleProvider = Provider.of<VehicleProvider>(context);
     final selectedVehicle = vehicleProvider.selectedVehicle;
 
-    return Scaffold(
+    return Theme(
+      data: AppTheme.darkTheme,
+      child: Scaffold(
       appBar: AppBar(
-        title: const Text('Confirm Booking'),
-        backgroundColor: primaryBlue,
-        foregroundColor: Colors.white,
+          title: const Text('Select Space'),
         actions: [
           VehicleSelector(
             onVehicleSelected: (vehicle) {
@@ -281,62 +248,103 @@ class _BookingScreenState extends State<BookingScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Parking Details Card
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
+                    Container(
+                      height: 50,
+                      margin: const EdgeInsets.symmetric(vertical: 16),
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        children: [
+                          for (int i = 0; i < 3; i++)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text('Floor ${i + 1}'),
+                                selected: _selectedFloor == i,
+                                onSelected: (selected) {
+                                  setState(() => _selectedFloor = i);
+                                },
+                                selectedColor: AppTheme.primaryBlue,
+                                backgroundColor: AppTheme.cardBackground,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Parking Lot: ${widget.parkingData['name']}',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: primaryBlue,
+                            'Select Parking Space',
+                            style: Theme.of(context).textTheme.titleLarge,
                             ),
+                          const SizedBox(height: 16),
+                          ParkingSpaceGrid(
+                            slots: _parkingSlots,
+                            selectedSlotId: _assignedSlot?['id'],
+                            onSlotSelected: _selectSlot,
                           ),
-                          const SizedBox(height: 8),
                           if (_assignedSlot != null) ...[
+                            const SizedBox(height: 24),
+                            Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                             Text(
-                              'Rate: ₹${_assignedSlot!['rate_per_hour']}/hour',
+                                      'Booking Details',
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
                             const SizedBox(height: 16),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'Rate per hour',
+                                          style: Theme.of(context).textTheme.bodyMedium,
+                                        ),
                             Text(
-                              'Assigned Slot: ${_assignedSlot!['slot_number']}',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    color: Colors.green,
+                                          '₹${_assignedSlot!['rate_per_hour']}',
+                                          style: Theme.of(context).textTheme.titleMedium,
                                   ),
+                                      ],
                             ),
-                            const SizedBox(height: 16),
+                                    const SizedBox(height: 8),
                             InkWell(
                               onTap: _selectTime,
                               child: Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey.shade300),
-                                  borderRadius: BorderRadius.circular(8),
+                                          color: AppTheme.darkSurface,
+                                          borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
-                                      'Select Parking Duration',
-                                      style: Theme.of(context).textTheme.titleMedium,
+                                              'Duration',
+                                              style: Theme.of(context).textTheme.bodyMedium,
                                     ),
                                     Row(
                                       children: [
-                                        Icon(Icons.access_time, color: Colors.blue),
+                                                Icon(
+                                                  Icons.access_time,
+                                                  color: AppTheme.primaryBlue,
+                                                  size: 20,
+                                                ),
                                         const SizedBox(width: 8),
                                         Text(
                                           _selectedTime != null
                                               ? 'Until ${_selectedTime!.format(context)}'
                                               : 'Select Time',
                                           style: TextStyle(
-                                            color: Colors.blue,
+                                                    color: AppTheme.primaryBlue,
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
@@ -346,48 +354,53 @@ class _BookingScreenState extends State<BookingScreen> {
                                 ),
                               ),
                             ),
+                                    if (_selectedTime != null) ...[
                             const SizedBox(height: 16),
-                            if (_selectedTime != null) ...[
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
                               Text(
-                                'Duration: $_selectedDuration hour${_selectedDuration > 1 ? 's' : ''}',
-                                style: Theme.of(context).textTheme.titleMedium,
+                                            'Total Amount',
+                                            style: Theme.of(context).textTheme.bodyMedium,
                               ),
-                              const SizedBox(height: 8),
                               Text(
-                                'Total Fee: ₹${(_assignedSlot!['rate_per_hour'] * _selectedDuration).toStringAsFixed(2)}',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green,
+                                            '₹${(_assignedSlot!['rate_per_hour'] * _selectedDuration).toStringAsFixed(2)}',
+                                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                              color: AppTheme.primaryBlue,
                                     ),
                               ),
                             ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
                           ],
                         ],
                       ),
                     ),
+                  ],
+                ),
+              ),
+        bottomNavigationBar: _assignedSlot != null
+            ? Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.darkSurface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
                   ),
-                  const SizedBox(height: 24),
-                  if (selectedVehicle != null && _assignedSlot == null)
-                    CustomButton(
-                      text: 'Assign Slot',
-                      onPressed: _isLoading ? null : _getAvailableSlot,
-                      isLoading: _isLoading,
-                    )
-                  else if (_assignedSlot != null) ...[
-                    CustomButton(
-                      text: 'Get Directions',
-                      onPressed: _isLoading ? null : _openDirections,
-                      isLoading: _isLoading,
                     ),
-                    const SizedBox(height: 16),
-                    CustomButton(
+                child: SafeArea(
+                  child: CustomButton(
                       text: 'Confirm Booking',
                       onPressed: (_isLoading || _selectedTime == null) ? null : _bookSlot,
                       isLoading: _isLoading,
                     ),
-                  ],
-                ],
               ),
+              )
+            : null,
             ),
     );
   }

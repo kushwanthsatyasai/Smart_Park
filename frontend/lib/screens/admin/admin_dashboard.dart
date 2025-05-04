@@ -21,6 +21,9 @@ import '../../admin_services.dart';
 import 'qr_scanner_stub.dart'
     if (dart.library.io) 'package:qr_code_scanner/qr_code_scanner.dart';
 
+// Import the enhanced registration page
+import './enhanced_parking_lot_registration.dart';
+
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
 
@@ -55,17 +58,17 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 4, vsync: this);
     _checkAdminAccess();
-    _tabController = TabController(length: 3, vsync: this);
+    _loadServerSettings();
+    
+    // Fetch initial data
     _fetchParkingLots();
     _fetchActiveBookings();
     _fetchParkingHistory();
     
-    // Load saved server URL if any
-    _loadServerSettings();
-    
     // Refresh data periodically
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
       _fetchActiveBookings();
       _fetchParkingHistory();
       _checkServerConnection();
@@ -178,7 +181,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
     try {
       final response = await _supabase
           .from('parking_lots')
-          .select('id, name, location, total_slots')
+          .select('id, name, address, total_slots')
           .eq('owner_id', _supabase.auth.currentUser!.id);
       
       setState(() {
@@ -203,15 +206,68 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             entry_time,
             exit_time,
             assigned_slot_id,
-            parking_lots(name),
-            vehicles!inner(license_plate, brand, model, color),
-            profiles!inner(full_name, phone_number)
+            user_id,
+            parking_id,
+            slot_id,
+            parking_lots!parking_bookings_parking_id_fkey(id, name),
+            profiles!parking_bookings_user_id_fkey(id, name, phone_number),
+            user_vehicles!inner(id, vehicle_number, vehicle_type, nickname)
           ''')
           .eq('status', 'active')
           .order('booking_time', ascending: false);
       
+      // Get active bookings
+      List<Map<String, dynamic>> bookings = List<Map<String, dynamic>>.from(response);
+      
+      // Debug data structure
+      if (bookings.isNotEmpty) {
+        print('First booking keys: ${bookings.first.keys.toList()}');
+        print('Parking lots data: ${bookings.first['parking_lots']}');
+      }
+      
+      // If there are bookings, fetch the user's vehicles separately
+      if (bookings.isNotEmpty) {
+        // Extract all user IDs from bookings
+        List<String> userIds = bookings
+            .where((booking) => booking['user_id'] != null)
+            .map<String>((booking) => booking['user_id'].toString())
+            .toList();
+
+        if (userIds.isNotEmpty) {
+          // Fetch vehicle details for each user
+          for (var booking in bookings) {
+            if (booking['user_id'] != null) {
+              try {
+                final vehicleResponse = await _supabase
+                    .from('user_vehicles')
+                    .select('id, vehicle_number, vehicle_type, nickname')
+                    .eq('user_id', booking['user_id'])
+                    .maybeSingle();
+                    
+                if (vehicleResponse != null) {
+                  booking['user_vehicles'] = vehicleResponse;
+                } else {
+                  booking['user_vehicles'] = {
+                    'vehicle_number': 'Not Registered',
+                    'vehicle_type': 'Not Registered',
+                    'nickname': 'Not Registered'
+                  };
+                }
+              } catch (e) {
+                print('Error fetching vehicle for user ${booking['user_id']}: $e');
+                booking['user_vehicles'] = {
+                  'vehicle_number': 'Not Registered',
+                  'vehicle_type': 'Not Registered',
+                  'nickname': 'Not Registered'
+                };
+              }
+            }
+          }
+        }
+      }
+      
       setState(() {
-        _activeBookings = List<Map<String, dynamic>>.from(response);
+        _activeBookings = bookings;
       });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -231,19 +287,77 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             entry_time,
             exit_time,
             assigned_slot_id,
+            user_id,
+            parking_id,
+            slot_id,
             total_fee,
-            parking_lots(name),
-            vehicles!inner(license_plate, brand, model),
-            profiles!inner(full_name)
+            parking_lots!parking_bookings_parking_id_fkey(id, name),
+            profiles!parking_bookings_user_id_fkey(id, name, phone_number)
           ''')
           .or('status.eq.completed,status.eq.expired')
           .order('booking_time', ascending: false)
           .limit(20);
       
+      List<Map<String, dynamic>> historyBookings = List<Map<String, dynamic>>.from(response);
+      
+      for (var booking in historyBookings) {
+        // VEHICLE
+        if (booking['user_id'] != null) {
+          try {
+            final vehicleResponse = await _supabase
+                .from('user_vehicles')
+                .select('id, vehicle_number, vehicle_type, nickname')
+                .eq('user_id', booking['user_id'])
+                .maybeSingle();
+            booking['user_vehicles'] = vehicleResponse ??
+                {
+                  'vehicle_number': 'Not Registered',
+                  'vehicle_type': 'Not Registered',
+                  'nickname': 'Not Registered'
+                };
+          } catch (e) {
+            booking['user_vehicles'] = {
+              'vehicle_number': 'Not Registered',
+              'vehicle_type': 'Not Registered',
+              'nickname': 'Not Registered'
+            };
+          }
+        }
+
+        // USER PROFILE
+        if (booking['profiles!parking_bookings_user_id_fkey'] == null && booking['user_id'] != null) {
+          try {
+            final userResponse = await _supabase
+                .from('profiles')
+                .select('name, phone_number')
+                .eq('id', booking['user_id'])
+                .maybeSingle();
+            booking['profiles!parking_bookings_user_id_fkey'] = userResponse ?? {'name': 'Unknown', 'phone_number': ''};
+          } catch (e) {
+            booking['profiles!parking_bookings_user_id_fkey'] = {'name': 'Unknown', 'phone_number': ''};
+          }
+        }
+
+        // PARKING LOT
+        if (booking['parking_lots!parking_bookings_parking_id_fkey'] == null && booking['parking_id'] != null) {
+          try {
+            final parkingLotResponse = await _supabase
+                .from('parking_lots')
+                .select('name')
+                .eq('id', booking['parking_id'])
+                .maybeSingle();
+            booking['parking_lots!parking_bookings_parking_id_fkey'] = parkingLotResponse ?? {'name': 'Unknown'};
+          } catch (e) {
+            booking['parking_lots!parking_bookings_parking_id_fkey'] = {'name': 'Unknown'};
+          }
+        }
+      }
+      
       setState(() {
-        _parkingHistory = List<Map<String, dynamic>>.from(response);
+        _parkingHistory = historyBookings;
       });
     } catch (e) {
+      print('Error loading parking history: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error loading parking history: $e')),
       );
@@ -270,7 +384,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
       
       // Second, send command to ESP32 to open gate
       if (_scannedBooking != null) {
-        final parkingLotId = _parkingLots.isNotEmpty ? _parkingLots[0]['id'] : null;
+        final parkingLotId = _scannedBooking!['parking_id'];
         final assignedSlotId = _scannedBooking!['assigned_slot_id'];
         final verificationCode = _scannedBooking!['verification_code'];
         
@@ -279,7 +393,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
           final qrData = {
             "booking_id": bookingId,
             "verification_code": verificationCode,
-            "assigned_slot_id": assignedSlotId,
+            "slot_number": assignedSlotId,
             "parking_lot_id": parkingLotId
           };
           
@@ -454,6 +568,29 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
   void _showVerificationDialog() {
     if (_scannedBooking == null) return;
     
+    // Ensure we have vehicle data
+    final vehicleData = _scannedBooking!['user_vehicles'] ?? {
+      'vehicle_number': 'Not Registered',
+      'vehicle_type': 'Not Registered',
+      'nickname': 'Not Registered'
+    };
+    
+    // Get parking lot name
+    String parkingLotName = "Unknown";
+    if (_scannedBooking!.containsKey('parking_lots!parking_bookings_parking_id_fkey')) {
+      parkingLotName = _scannedBooking!['parking_lots!parking_bookings_parking_id_fkey']['name'] ?? "Unknown";
+    } else if (_scannedBooking!.containsKey('parking_lots')) {
+      parkingLotName = _scannedBooking!['parking_lots']['name'] ?? "Unknown";
+    }
+    
+    // Get user name
+    String userName = "Unknown";
+    if (_scannedBooking!.containsKey('profiles!parking_bookings_user_id_fkey')) {
+      userName = _scannedBooking!['profiles!parking_bookings_user_id_fkey']['name'] ?? "Unknown";
+    } else if (_scannedBooking!.containsKey('profiles')) {
+      userName = _scannedBooking!['profiles']['name'] ?? "Unknown";
+    }
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -464,15 +601,15 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Customer: ${_scannedBooking!['profiles']['full_name']}'),
+              Text('Customer: $userName'),
               const SizedBox(height: 4),
-              Text('Vehicle: ${_scannedBooking!['vehicles']['brand']} ${_scannedBooking!['vehicles']['model']}'),
+              Text('Vehicle: ${vehicleData['vehicle_type']} ${vehicleData['nickname']}'),
               const SizedBox(height: 4),
-              Text('License Plate: ${_scannedBooking!['vehicles']['license_plate']}'),
+              Text('License Plate: ${vehicleData['vehicle_number']}'),
               const SizedBox(height: 4),
               Text('Slot ID: ${_scannedBooking!['assigned_slot_id']}'),
               const SizedBox(height: 4),
-              Text('Parking Lot: ${_scannedBooking!['parking_lots']['name']}'),
+              Text('Parking Lot: $parkingLotName'),
             ],
           ),
         ),
@@ -628,6 +765,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
             Tab(text: 'Overview'),
             Tab(text: 'Active Bookings'),
             Tab(text: 'History'),
+            Tab(text: 'Slot Management'),
           ],
         ),
       ),
@@ -671,7 +809,12 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
               title: const Text('Register Parking Lot'),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/admin/register-parking');
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const EnhancedParkingLotRegistration(),
+                  ),
+                );
               },
             ),
             ListTile(
@@ -716,6 +859,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                 _buildOverviewTab(),
                 _buildActiveBookingsTab(),
                 _buildHistoryTab(),
+                _buildSlotManagementTab(),
               ],
             ),
       floatingActionButton: FloatingActionButton(
@@ -813,7 +957,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                       margin: const EdgeInsets.only(bottom: 8.0),
                       child: ListTile(
                         title: Text(lot['name']),
-                        subtitle: Text(lot['location']),
+                        subtitle: Text(lot['address']),
                         trailing: Text('${lot['total_slots']} slots'),
                       ),
                     );
@@ -882,6 +1026,25 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                       DateTime.parse(booking['entry_time']).toLocal())
                   : 'Not entered yet';
               
+              // Get vehicle data safely (already fetched)
+              final vehicleData = booking['user_vehicles'] ?? {
+                'vehicle_number': 'Not Registered',
+                'vehicle_type': 'Not Registered',
+                'nickname': 'Not Registered'
+              };
+              
+              // Get parking lot data safely (already fetched)
+              String parkingLotName = "Unknown";
+              if (booking.containsKey('parking_lots!parking_bookings_parking_id_fkey') && booking['parking_lots!parking_bookings_parking_id_fkey'] != null) {
+                parkingLotName = booking['parking_lots!parking_bookings_parking_id_fkey']['name'] ?? "Unknown";
+              }
+              
+              // Get user name (already fetched)
+              String userName = "Unknown";
+              if (booking.containsKey('profiles!parking_bookings_user_id_fkey') && booking['profiles!parking_bookings_user_id_fkey'] != null) {
+                userName = booking['profiles!parking_bookings_user_id_fkey']['name'] ?? "Unknown";
+              }
+              
               return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Padding(
@@ -893,7 +1056,7 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            booking['vehicles']['license_plate'],
+                            vehicleData['vehicle_number'],
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
@@ -922,12 +1085,14 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '${booking['vehicles']['brand']} ${booking['vehicles']['model']} (${booking['vehicles']['color']})',
+                        '${vehicleData['vehicle_type']} ${vehicleData['nickname']}',
                       ),
                       const SizedBox(height: 4),
-                      Text('Customer: ${booking['profiles']['full_name']}'),
+                      Text('Customer: $userName'),
                       const SizedBox(height: 4),
                       Text('Slot ID: ${booking['assigned_slot_id']}'),
+                      const SizedBox(height: 4),
+                      Text('Parking: $parkingLotName'),
                       const SizedBox(height: 4),
                       Text('Entry Time: $entryTime'),
                       const SizedBox(height: 8),
@@ -948,25 +1113,31 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                                       _scannedBooking = booking;
                                     });
                                     _showVerificationDialog();
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+                                  },
+                                ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
               );
             },
           );
   }
 
   Widget _buildHistoryTab() {
-    return _parkingHistory.isEmpty
+    final validHistory = _parkingHistory.where((booking) =>
+      booking['user_vehicles'] != null &&
+      booking['profiles!parking_bookings_user_id_fkey'] != null &&
+      booking['parking_lots!parking_bookings_parking_id_fkey'] != null
+    ).toList();
+
+    return validHistory.isEmpty
         ? const Center(child: Text('No parking history found.'))
         : ListView.builder(
-            itemCount: _parkingHistory.length,
+            itemCount: validHistory.length,
             itemBuilder: (context, index) {
-              final booking = _parkingHistory[index];
+              final booking = validHistory[index];
               final entryTime = booking['entry_time'] != null
                   ? DateFormat('MMM d, h:mm a').format(
                       DateTime.parse(booking['entry_time']).toLocal())
@@ -976,31 +1147,427 @@ class _AdminDashboardState extends State<AdminDashboard> with SingleTickerProvid
                       DateTime.parse(booking['exit_time']).toLocal())
                   : 'N/A';
               final fee = booking['total_fee'] != null
-                  ? '\$${booking['total_fee']}'
+                  ? '₹${booking['total_fee'].toStringAsFixed(2)}'
                   : 'N/A';
               
-    return Card(
+              // Get vehicle data safely (already fetched)
+              final vehicleData = booking['user_vehicles'] ?? {
+                'vehicle_number': 'No vehicle info',
+                'vehicle_type': '',
+                'nickname': ''
+              };
+              
+              // Get parking lot data safely (already fetched)
+              String parkingLotName = booking['parking_lots!parking_bookings_parking_id_fkey']?['name'] ?? 'Unknown';
+              
+              // Get user name (already fetched)
+              String userName = booking['profiles!parking_bookings_user_id_fkey']?['name'] ?? 'Unknown';
+              
+              return Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: ListTile(
-                  title: Text(
-                    '${booking['vehicles']['license_plate']} - ${booking['vehicles']['brand']} ${booking['vehicles']['model']}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Column(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-                      Text('Customer: ${booking['profiles']['full_name']}'),
-                      Text('Entry: $entryTime'),
-                      Text('Exit: $exitTime'),
-                      Text('Fee: $fee'),
-                      Text('Status: ${booking['status']}'),
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            vehicleData['vehicle_number'],
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: booking['status'] == 'completed'
+                                  ? Colors.green
+                                  : Colors.orange,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              booking['status'].toString().toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text('${vehicleData['vehicle_type']} ${vehicleData['nickname']}'),
+                      const SizedBox(height: 4),
+                      Text('Customer: $userName'),
+                      const SizedBox(height: 4),
+                      Text('Slot ID: ${booking['assigned_slot_id']}'),
+                      const SizedBox(height: 4),
+                      Text('Parking: $parkingLotName'),
+                      const SizedBox(height: 4),
+                      Text('Entry Time: $entryTime'),
+                      const SizedBox(height: 4),
+                      Text('Exit Time: $exitTime'),
+                      const SizedBox(height: 4),
+                      Text('Total Fee: $fee'),
                     ],
                   ),
-                  isThreeLine: true,
                 ),
               );
             },
           );
+  }
+
+  Widget _buildSlotManagementTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Slot Management',
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // Section for expiring inactive bookings
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Expire Inactive Bookings',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'This will find all pending bookings that are older than 5 minutes and mark them as expired, freeing up the slots.',
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _expireInactiveBookings,
+                    icon: const Icon(Icons.timer_off),
+                    label: const Text('Expire Inactive Bookings'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // Section for freeing up occupied slots
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Free Up Slots',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'This will reset all slots to available status. Use with caution!',
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _freeUpAllSlots,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Reset All Slots'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          // Section for viewing slot status by parking lot
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Slot Status by Parking Lot',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _fetchParkingLotsWithSlots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      
+                      if (snapshot.hasError) {
+                        return Text('Error: ${snapshot.error}');
+                      }
+                      
+                      final parkingLots = snapshot.data ?? [];
+                      
+                      if (parkingLots.isEmpty) {
+                        return const Text('No parking lots found');
+                      }
+                      
+                      return ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: parkingLots.length,
+                        itemBuilder: (context, index) {
+                          final lot = parkingLots[index];
+                          final slots = List<Map<String, dynamic>>.from(lot['slots'] ?? []);
+                          
+                          return ExpansionTile(
+                            title: Text(lot['name'] ?? 'Unknown Lot'),
+                            subtitle: Text('${slots.length} slots'),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: slots.map((slot) {
+                                    final isAvailable = slot['is_available'] ?? false;
+                                    return InkWell(
+                                      onTap: () => _toggleSlotAvailability(slot['id']),
+                                      child: Chip(
+                                        label: Text('Slot ${slot['slot_number']}'),
+                                        backgroundColor: isAvailable
+                                            ? Colors.green.withOpacity(0.2)
+                                            : Colors.red.withOpacity(0.2),
+                                        labelStyle: TextStyle(
+                                          color: isAvailable ? Colors.green : Colors.red,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _expireInactiveBookings() async {
+    try {
+      setState(() => _isLoading = true);
+      
+      // Get current time
+      final now = DateTime.now().toUtc();
+      
+      // Calculate cutoff time (5 minutes ago)
+      final cutoffTime = now.subtract(const Duration(minutes: 5));
+      final cutoffTimeStr = cutoffTime.toIso8601String();
+      
+      // Find pending bookings older than 5 minutes
+      final expiredBookings = await _supabase
+          .from('parking_bookings')
+          .select('id, assigned_slot_id, slot_id')
+          .eq('status', 'pending')
+          .eq('is_verified', false)
+          .lte('created_at', cutoffTimeStr);
+      
+      int expiredCount = 0;
+      
+      // Process each expired booking
+      for (var booking in expiredBookings) {
+        // Update booking status
+        await _supabase
+            .from('parking_bookings')
+            .update({
+              'status': 'expired',
+              'updated_at': now.toIso8601String()
+            })
+            .eq('id', booking['id']);
+        
+        // Free up the assigned slot
+        final slotId = booking['slot_id'] ?? booking['assigned_slot_id'];
+        if (slotId != null) {
+          await _supabase
+              .from('parking_slots')
+              .update({'is_available': true})
+              .eq('id', slotId);
+        }
+        
+        expiredCount++;
+      }
+      
+      // Refresh data
+      _fetchActiveBookings();
+      _fetchParkingHistory();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$expiredCount inactive bookings expired'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+  
+  Future<void> _freeUpAllSlots() async {
+    try {
+      setState(() => _isLoading = true);
+      
+      // Confirm action with dialog
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Warning'),
+          content: const Text(
+            'This will reset ALL slots to available status, even those that might be currently occupied. Are you sure?'
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Yes, Reset All'),
+            ),
+          ],
+        ),
+      );
+      
+      if (confirm != true) return;
+      
+      // Update all slots to available
+      await _supabase
+          .from('parking_slots')
+          .update({'is_available': true});
+      
+      // Refresh data
+      _fetchActiveBookings();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All slots have been reset to available'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+  
+  Future<void> _toggleSlotAvailability(String slotId) async {
+    try {
+      setState(() => _isLoading = true);
+      
+      // Get current slot status
+      final slotResponse = await _supabase
+          .from('parking_slots')
+          .select('is_available')
+          .eq('id', slotId)
+          .single();
+      
+      final isCurrentlyAvailable = slotResponse['is_available'] ?? false;
+      
+      // Toggle availability
+      await _supabase
+          .from('parking_slots')
+          .update({'is_available': !isCurrentlyAvailable})
+          .eq('id', slotId);
+      
+      // Refresh data
+      _fetchActiveBookings();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Slot is now ${!isCurrentlyAvailable ? 'available' : 'unavailable'}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+  
+  Future<List<Map<String, dynamic>>> _fetchParkingLotsWithSlots() async {
+    try {
+      final response = await _supabase
+          .from('parking_lots')
+          .select('id, name, parking_slots(*)');
+      
+      final List<Map<String, dynamic>> parkingLots = [];
+      
+      for (var lot in response) {
+        parkingLots.add({
+          'id': lot['id'],
+          'name': lot['name'],
+          'slots': lot['parking_slots'],
+        });
+      }
+      
+      return parkingLots;
+    } catch (e) {
+      print('Error fetching parking lots with slots: $e');
+      return [];
+    }
   }
 
   void _showQRScannerDialog() {
