@@ -14,13 +14,7 @@
 #define CAMERA_MODEL_AI_THINKER
 
 // WiFi credentials
-const char* ssid = "Kushwanth's Iphone";
-const char* password = "ammalove";
 
-// Supabase configuration
-const char* supabaseUrl = "https://ubqrfmyvutvstgxeubvr.supabase.co";
-const char* supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVicXJmbXl2dXR2c3RneGV1YnZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzkyNzc1MDgsImV4cCI6MjA1NDg1MzUwOH0.3wU-ZJFNSJZIoL2DdrlJjbmb1799ElBtt_IXNwXf-ek";
-const char* parkingLotId = "8077dae0-c4f8-40ba-94c4-aa985c30ebfb";
 
 // Pin definitions
 const int SERVO_PIN = 12;      // Servo motor pin
